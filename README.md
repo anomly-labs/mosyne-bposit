@@ -136,7 +136,10 @@ If you use this work, please cite the whitepaper:
 
 ## License
 
-Apache 2.0. See `LICENSE`.
+Copyright (c) 2026 Ry Bruscoe and Anomly, Inc.
+
+Licensed under the Apache License, Version 2.0. See `LICENSE` for the
+full license text and `NOTICE` for attribution requirements.
 
 ## Background
 

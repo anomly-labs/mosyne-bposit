@@ -89,4 +89,7 @@ result reproducible from the included single-command runner.
 
 ## License
 
-Apache 2.0.
+Copyright (c) 2026 Ry Bruscoe and Anomly, Inc.
+
+Licensed under the Apache License, Version 2.0. See `LICENSE` and
+`NOTICE` at the repository root for details.
