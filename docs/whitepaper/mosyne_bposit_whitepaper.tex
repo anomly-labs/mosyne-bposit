@@ -851,6 +851,22 @@ silicon design problem in a useful way:
           \bpsixteen{} precision, fitting comfortably in on-die ROM).
 \end{itemize}
 
+\subsection{Vertical integration}
+\label{subsec:vertical}
+
+The pipeline presented here is one of three implementation fidelities
+of the bposit arithmetic stack at Anomly, Inc. The other two are
+hardware: an FPGA bitstream targeting the Xilinx Alveo U200 (PCIe
+accelerator, programmed and validated in fabric) and a custom posit
+ASIC submitted to the SkyWater 130\,nm shuttle through ChipFoundry,
+with first silicon (100 prototype dies) expected to return in Q2 2026.
+The 256-bit \quire{} layout used in this paper (1 sign + 63 carry +
+96 integer + 96 fraction bit fields) is reduced-to-practice in all
+three implementations from the same architectural specification.
+Energy-efficiency characterisation of the ASIC, and a bit-exact
+cross-implementation equivalence proof against the CUDA pipeline,
+are reserved for a follow-up paper after silicon arrives.
+
 \section{Related Work}
 \label{sec:related}
 
