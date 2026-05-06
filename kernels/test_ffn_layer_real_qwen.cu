@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Ry Bruscoe and Anomly, Inc.
+// SPDX-License-Identifier: Apache-2.0
+
 // test_ffn_layer_real_qwen.cu — REAL Qwen2.5-Coder-3B FFN layer 10 forward pass
 // on bposit-IMMA, validated against BF16 HMMA on the same layer.
 //

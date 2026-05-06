@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Ry Bruscoe and Anomly, Inc.
+# SPDX-License-Identifier: Apache-2.0
+
 """mosyne-bposit-build — compile libmosyne_bposit.so via nvcc.
 
 Run once after ``pip install mosyne-bposit``:

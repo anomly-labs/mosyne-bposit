@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Ry Bruscoe and Anomly, Inc.
+# SPDX-License-Identifier: Apache-2.0
+
 [build-system]
 requires = ["setuptools>=64", "wheel"]
 build-backend = "setuptools.build_meta"

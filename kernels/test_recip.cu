@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Ry Bruscoe and Anomly, Inc.
+// SPDX-License-Identifier: Apache-2.0
+
 // test_recip.cu — validate the GPU bposit16 reciprocal LUT.
 //
 // 65 K × 2-byte __device__ const table baked at build time from the Python

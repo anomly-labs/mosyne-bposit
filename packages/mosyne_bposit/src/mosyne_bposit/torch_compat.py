@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Ry Bruscoe and Anomly, Inc.
+# SPDX-License-Identifier: Apache-2.0
+
 """mosyne_bposit.torch_compat — drop-in PyTorch integration.
 
 This module is imported only when ``torch`` is available; importing it

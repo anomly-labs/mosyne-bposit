@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Ry Bruscoe and Anomly, Inc.
+// SPDX-License-Identifier: Apache-2.0
+
 // bposit16_encode.cuh — quire256 + bposit16 encode/add/mul device functions.
 //
 // Self-contained header for the 5-DST CUDA toolkit. Provides:

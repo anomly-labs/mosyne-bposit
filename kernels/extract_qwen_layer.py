@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# Copyright (c) 2026 Ry Bruscoe and Anomly, Inc.
+# SPDX-License-Identifier: Apache-2.0
+
 """Extract one transformer FFN layer's weights from a Qwen safetensors
 checkpoint and write them as raw float32 binaries (column-major) for the
 test_ffn_layer_real_qwen.cu CUDA bench. Pure stdlib + numpy — no torch

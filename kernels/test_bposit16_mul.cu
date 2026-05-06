@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Ry Bruscoe and Anomly, Inc.
+// SPDX-License-Identifier: Apache-2.0
+
 // test_bposit16_mul.cu — Validate bposit16_mul_dev (a · b via log+exp2).
 //
 // Path: mul(a, b) = sign(a)·sign(b) · exp2(log2(|a|) + log2(|b|))

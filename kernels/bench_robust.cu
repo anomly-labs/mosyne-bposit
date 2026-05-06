@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Ry Bruscoe and Anomly, Inc.
+// SPDX-License-Identifier: Apache-2.0
+
 // bench_robust.cu — rigorous matmul bench with trial variance + cuBLASLt
 // algorithm sweep. Replaces single-shot bench_imma_vs_qmma for whitepaper
 // numbers that need to survive scrutiny.

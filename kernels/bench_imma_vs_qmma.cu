@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Ry Bruscoe and Anomly, Inc.
+// SPDX-License-Identifier: Apache-2.0
+
 // bench_imma_vs_qmma.cu — measured throughput of INT8 IMMA vs BF16 (which
 // cuBLASLt routes through FP4 QMMA on Blackwell, per the morning's SASS RE)
 // at the same GEMM shape, on the same GPU. The headline question:

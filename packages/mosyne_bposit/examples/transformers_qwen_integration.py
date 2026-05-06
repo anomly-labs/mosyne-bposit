@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# Copyright (c) 2026 Ry Bruscoe and Anomly, Inc.
+# SPDX-License-Identifier: Apache-2.0
+
 """Replace selected nn.Linear layers in a Hugging Face Qwen2.5 model with
 mosyne-bposit W8A8 versions, then run inference and compare output to
 the unmodified model.

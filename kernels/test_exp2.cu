@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Ry Bruscoe and Anomly, Inc.
+// SPDX-License-Identifier: Apache-2.0
+
 // test_exp2.cu — validate the GPU bposit16 exp2 (2^x) LUT.
 //
 // Companion to log2_lut. Together they enable POSITIVE-OPERAND multiplication

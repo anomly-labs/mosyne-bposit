@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Copyright (c) 2026 Ry Bruscoe and Anomly, Inc.
+# SPDX-License-Identifier: Apache-2.0
+
 # bench_robust_sweep.sh — multi-trial mean±stddev sweep + algorithm enumeration
 # for the suspect skinny-K shapes. Replaces single-shot bench_transformer_shapes.sh
 # for whitepaper-grade numbers.

@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Ry Bruscoe and Anomly, Inc.
+// SPDX-License-Identifier: Apache-2.0
+
 // test_ffn_layer_perch.cu — Llama-class FFN forward with PER-CHANNEL weight
 // quantization. Demonstrates that the bposit-IMMA pipeline matches BF16 HMMA
 // throughput AND production-grade inference accuracy (L2 relerr < 1%) when

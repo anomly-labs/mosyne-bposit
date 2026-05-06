@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Ry Bruscoe and Anomly, Inc.
+// SPDX-License-Identifier: Apache-2.0
+
 // test_bposit16_add.cu — Validate bposit16_add_dev (a + b via quire256).
 //
 // The exact path: a + b = quire256_to_bposit16(quire(a) + quire(b)).

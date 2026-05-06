@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Ry Bruscoe and Anomly, Inc.
+# SPDX-License-Identifier: Apache-2.0
+
 """mosyne_bposit — bposit-via-IMMA W8A8 matrix multiplication on NVIDIA tensor cores.
 
 After ``pip install mosyne-bposit``, run ``mosyne-bposit-build`` once to

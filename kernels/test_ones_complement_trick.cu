@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Ry Bruscoe and Anomly, Inc.
+// SPDX-License-Identifier: Apache-2.0
+
 // test_ones_complement_trick.cu — Gustafson's one's-complement reciprocal trick.
 //
 // Per private comm with John Gustafson (2026-05-05): the Stanford tensor

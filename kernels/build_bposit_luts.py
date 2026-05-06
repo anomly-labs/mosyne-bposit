@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Ry Bruscoe and Anomly, Inc.
+# SPDX-License-Identifier: Apache-2.0
+
 """Generate __device__ lookup tables for bposit16 → bposit16 transcendental
 functions, baked from the validated Python reference (bposit16_reference.py).
 

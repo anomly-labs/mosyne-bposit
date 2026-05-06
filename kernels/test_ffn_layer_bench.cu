@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Ry Bruscoe and Anomly, Inc.
+// SPDX-License-Identifier: Apache-2.0
+
 // test_ffn_layer_bench.cu — transformer FFN forward pass: BF16 HMMA vs bposit-IMMA.
 //
 // Demonstrates that a real transformer block (Llama-3 8B FFN-class shape) can

@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Ry Bruscoe and Anomly, Inc.
+// SPDX-License-Identifier: Apache-2.0
+
 // test_int32_to_bposit32.cu — CUDA-native bposit32 encoder.
 //
 // Takes int32 fixed-point values (semantic = int32 / 2^scale_shift) and

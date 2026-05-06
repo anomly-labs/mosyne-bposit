@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Ry Bruscoe and Anomly, Inc.
+# SPDX-License-Identifier: Apache-2.0
+
 """ctypes wrapper around libmosyne_bposit.so.
 
 The shared library is built once at install time by mosyne-bposit-build,

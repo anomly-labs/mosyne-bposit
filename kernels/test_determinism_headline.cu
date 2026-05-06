@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Ry Bruscoe and Anomly, Inc.
+// SPDX-License-Identifier: Apache-2.0
+
 // test_determinism_headline.cu — the Anomly headline demo, real version.
 //
 // HEADLINE CLAIM (defensible):

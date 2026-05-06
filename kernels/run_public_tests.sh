@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Copyright (c) 2026 Ry Bruscoe and Anomly, Inc.
+# SPDX-License-Identifier: Apache-2.0
+
 # run_public_tests.sh — single-command verification of the bposit ALU
 # primitives + AI/ML demos described in the whitepaper.
 

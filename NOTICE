@@ -1,0 +1,16 @@
+mosyne-bposit
+Copyright (c) 2026 Ry Bruscoe and Anomly, Inc.
+
+This product includes software developed by Ry Bruscoe and Anomly, Inc.
+(https://anomly.com).
+
+Licensed under the Apache License, Version 2.0 (the "License"); you may
+not use this software except in compliance with the License. A copy of
+the License is included in this distribution as the file LICENSE, and is
+also available at:
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Bounded posit (bposit) and quire arithmetic are concepts due to John L.
+Gustafson; this software is an independent CUDA implementation and is
+not endorsed by or affiliated with Dr. Gustafson.

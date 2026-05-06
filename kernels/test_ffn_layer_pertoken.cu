@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Ry Bruscoe and Anomly, Inc.
+// SPDX-License-Identifier: Apache-2.0
+
 // test_ffn_layer_pertoken.cu — production-grade Llama-class FFN forward pass
 // on bposit-IMMA with PER-TOKEN activation scaling + PER-CHANNEL weight scaling.
 //

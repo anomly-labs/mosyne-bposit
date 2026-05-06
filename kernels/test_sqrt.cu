@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Ry Bruscoe and Anomly, Inc.
+// SPDX-License-Identifier: Apache-2.0
+
 // test_sqrt.cu — validate the GPU bposit16 sqrt LUT.
 //
 // Provides bposit16_sqrt(p) for any positive p, as a 65 K × 2 byte LUT in

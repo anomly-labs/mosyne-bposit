@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Ry Bruscoe and Anomly, Inc.
+// SPDX-License-Identifier: Apache-2.0
+
 // test_quire_to_bp16.cu — Validate the CUDA quire256_to_bposit16 device function.
 //
 // Build:

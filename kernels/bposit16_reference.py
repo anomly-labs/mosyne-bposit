@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Ry Bruscoe and Anomly, Inc.
+# SPDX-License-Identifier: Apache-2.0
+
 """bposit16 reference implementation, integer-only, per Gustafson Ch.7.
 
 Parameters from spec/header (5DST_v2_API_SPEC.h, bposit_types.h):

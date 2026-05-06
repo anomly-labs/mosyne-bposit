@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Copyright (c) 2026 Ry Bruscoe and Anomly, Inc.
+# SPDX-License-Identifier: Apache-2.0
+
 # bench_transformer_shapes.sh — sweep BF16 HMMA vs INT8 IMMA at LLM-relevant
 # matmul shapes. Drives bench_imma_vs_qmma with the (M N K) triples that
 # represent the actual hot paths in transformer training and inference.

@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Ry Bruscoe and Anomly, Inc.
+// SPDX-License-Identifier: Apache-2.0
+
 // libmosyne_bposit.cu — shared library exposing the bposit-IMMA W8A8 pipeline
 // via a clean C ABI. Designed to be loaded from any language via dlopen /
 // ctypes / cffi / etc. — no PyTorch dependency, no per-use rebuild.
