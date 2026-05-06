@@ -128,7 +128,7 @@ If you use this work, please cite the whitepaper:
   title  = {Bounded Posits at IEEE Tensor-Core Throughput on Commodity
             NVIDIA Blackwell, with Bit-Exact Reproducibility},
   author = {Bruscoe, Ry},
-  institution = {Anomly Labs},
+  institution = {Anomly, Inc.},
   year   = {2026},
   url    = {https://github.com/anomly-llc/mosyne-bposit}
 }
