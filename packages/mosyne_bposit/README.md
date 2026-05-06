@@ -51,7 +51,7 @@ bits, on the same GPU and across different GPUs of the same architecture.
   dominates.
 
 See the white paper at
-<https://github.com/anomly-llc/mosyne-bposit/tree/main/docs/whitepaper>
+<https://github.com/anomly-labs/mosyne-bposit/tree/main/docs/whitepaper>
 for the full set of measurements.
 
 ## PyTorch / HuggingFace integration
@@ -84,7 +84,7 @@ compare logits to the BF16 baseline) lives at
 
 ## Repo
 
-<https://github.com/anomly-llc/mosyne-bposit> — full source, every
+<https://github.com/anomly-labs/mosyne-bposit> — full source, every
 result reproducible from the included single-command runner.
 
 ## License

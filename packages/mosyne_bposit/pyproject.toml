@@ -39,9 +39,9 @@ torch = ["torch>=2.0"]
 "mosyne-bposit-build" = "mosyne_bposit.build_so:main"
 
 [project.urls]
-Homepage = "https://github.com/anomly-llc/mosyne-bposit"
-Source   = "https://github.com/anomly-llc/mosyne-bposit"
-"Bug Tracker" = "https://github.com/anomly-llc/mosyne-bposit/issues"
+Homepage = "https://github.com/anomly-labs/mosyne-bposit"
+Source   = "https://github.com/anomly-labs/mosyne-bposit"
+"Bug Tracker" = "https://github.com/anomly-labs/mosyne-bposit/issues"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

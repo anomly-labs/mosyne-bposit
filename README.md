@@ -44,7 +44,7 @@ measurements, methodology, error analysis, and discussion.
 ## Quick start
 
 ```bash
-git clone https://github.com/anomly-llc/mosyne-bposit.git
+git clone https://github.com/anomly-labs/mosyne-bposit.git
 cd mosyne-bposit
 
 # 1. Build & validate the bposit ALU (about 30 s on a 5090 / 3090)
@@ -130,7 +130,7 @@ If you use this work, please cite the whitepaper:
   author = {Bruscoe, Ry},
   institution = {Anomly, Inc.},
   year   = {2026},
-  url    = {https://github.com/anomly-llc/mosyne-bposit}
+  url    = {https://github.com/anomly-labs/mosyne-bposit}
 }
 ```
 
