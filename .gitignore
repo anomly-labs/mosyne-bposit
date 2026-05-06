@@ -16,6 +16,7 @@ dist/
 # CUDA build outputs (kernels rebuild from .cu source via run_*.sh)
 kernels/test_*
 !kernels/test_*.cu
+!kernels/test_cases_*_inline.h
 kernels/bench_*
 !kernels/bench_*.cu
 !kernels/bench_*.sh
