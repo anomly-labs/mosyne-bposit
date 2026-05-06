@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mosyne-bposit"
+version = "0.1.0"
+description = "Bounded-posit (bposit) W8A8 matmul on NVIDIA tensor cores via INT8 IMMA, with bit-exact reproducibility."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "Apache-2.0" }
+authors = [
+    { name = "Ry Bruscoe", email = "ry@anomly.com" },
+]
+keywords = ["posit", "bposit", "quantization", "INT8", "IMMA", "tensor-cores", "LLM", "deterministic"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Environment :: GPU :: NVIDIA CUDA",
+]
+dependencies = [
+    "numpy>=1.20",
+]
+
+[project.optional-dependencies]
+torch = ["torch>=2.0"]
+
+[project.scripts]
+"mosyne-bposit-build" = "mosyne_bposit.build_so:main"
+
+[project.urls]
+Homepage = "https://github.com/anomly-llc/mosyne-bposit"
+Source   = "https://github.com/anomly-llc/mosyne-bposit"
+"Bug Tracker" = "https://github.com/anomly-llc/mosyne-bposit/issues"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+mosyne_bposit = ["_cuda/*.cu", "_cuda/*.h"]

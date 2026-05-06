@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.venv/
+.env
+build/
+dist/
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# CUDA build outputs (kernels rebuild from .cu source via run_*.sh)
+kernels/test_*
+!kernels/test_*.cu
+kernels/bench_*
+!kernels/bench_*.cu
+!kernels/bench_*.sh
+kernels/build.err
+kernels/bposit16_luts.cuh
+packages/mosyne_bposit/src/mosyne_bposit/libmosyne_bposit.so
+packages/mosyne_bposit/build/
+packages/mosyne_bposit/dist/
+
+# OS
+.DS_Store
