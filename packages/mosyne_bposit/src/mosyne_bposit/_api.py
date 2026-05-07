@@ -62,13 +62,13 @@ def linear_w8a8(x: np.ndarray, w: np.ndarray) -> np.ndarray:
     transpose-and-contiguize.  Returns a row-major float32 array of shape
     ``(M, N)``.
     """
-    lib = _ensure_library()
     if x.ndim != 2 or w.ndim != 2:
         raise ValueError(f"x and w must be 2-D (got x.shape={x.shape}, w.shape={w.shape})")
     if x.shape[1] != w.shape[0]:
         raise ValueError(
             f"shape mismatch: x.shape[1]={x.shape[1]} != w.shape[0]={w.shape[0]}"
         )
+    lib = _ensure_library()
     M, K = x.shape
     _, N = w.shape
 
