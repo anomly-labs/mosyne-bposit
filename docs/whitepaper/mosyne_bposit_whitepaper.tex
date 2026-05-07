@@ -959,16 +959,16 @@ The complete source is available at
 \url{https://github.com/anomly-labs/mosyne-bposit/tree/main}.
 
 \paragraph{Single-command verification.}
-\texttt{kernels/run\_public\_tests.sh} runs the bit-
-exact suite in under five minutes on an RTX 5090, including the
-determinism head-to-head (\Cref{tab:repro}), the matmul shape sweep
+\texttt{kernels/run\_public\_tests.sh} runs the bit-exact suite in
+under five minutes on an RTX 5090, including the determinism
+head-to-head (\Cref{tab:repro}), the matmul shape sweep
 (\Cref{tab:matmul}), the real \textsc{Qwen2.5} layer pass
 (\Cref{tab:qwen}), and the W8A8 PTQ progression (\Cref{tab:ptq}).
-\texttt{deploy/5dst\_cuda/bench\_robust\_sweep.sh} reproduces the
-multi-trial mean $\pm$ stddev sweep across all $11$ matmul shapes;
-\texttt{scripts/capture\_5090\_benches.sh} pauses a co-resident
-\texttt{vLLM} workload, runs both suites on the freed GPU, and
-restarts \texttt{vLLM} on exit.
+\texttt{kernels/bench\_robust\_sweep.sh} reproduces the multi-trial
+mean $\pm$ stddev sweep across all $11$ matmul shapes. The numbers in
+this paper were captured with any co-resident \texttt{vLLM} workload
+on the target GPU paused for the duration of the bench so the harness
+had exclusive access to HBM.
 
 \paragraph{Environment used for the numbers in this paper.}
 \begin{itemize}
