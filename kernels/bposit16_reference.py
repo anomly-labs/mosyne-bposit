@@ -360,17 +360,22 @@ def decoded_to_fraction(d: Decoded) -> Fraction:
 
 
 # ---- Encode (round-to-nearest-even) ----------------------------------------
-def _encode_unsigned(value: Fraction) -> int:
+def _encode_unsigned(value: Fraction, mode: str = "truncate") -> int:
     """Encode positive value as 15-bit unsigned posit field (no sign bit).
-    Round-to-nearest-even at the bposit16 ULP."""
-    # Decompose: value = useed^k * 2^e * (1 + f), 0 <= f < 1
-    # log_useed(value) = k + (e + log2(1+f)) / 2^ES
-    # We work in extended fixed-point: convert value to log_2 via Fraction
-    # approximation, then split.
-    # For simplicity, use integer-only k+e extraction via log2:
-    # bposit16 spec: useed = 2^(2^ES) = 256, so log_2(useed) = 8.
-    # Total exponent bits (k * 8 + e) => integer total_e.
-    # We compute total_e = floor(log2(value)) for which 2^total_e <= value.
+
+    ``mode`` selects the rounding policy at the 15-bit boundary:
+
+      * ``"truncate"`` (default) — drop bits past position 14. This matches
+        the baked CUDA LUTs and the bit-exact Python↔CUDA crosscheck, so
+        it is the default for backwards compatibility with the rest of
+        the test suite.
+      * ``"rtne"`` — round-to-nearest, ties-to-even (Gustafson posit
+        spec, Ch.7). Reduces the worst-case round-trip error by half a
+        ULP at the cost of breaking bit-exact equivalence with the
+        existing truncating CUDA encoder until that path is upgraded.
+    """
+    if mode not in ("truncate", "rtne"):
+        raise ValueError(f"unknown rounding mode: {mode!r}")
     if value == 0:
         return 0
 
@@ -412,8 +417,9 @@ def _encode_unsigned(value: Fraction) -> int:
 
     # We have 15 bits total in the unsigned field
     used = len(bits)
+    round_up = False
     if used >= 15:
-        # Regime ate everything (extreme value)
+        # Regime ate everything (extreme value) — no fraction bits to round.
         bits = bits[:15]
     else:
         # Encode exponent (ES = 3 bits, MSB-first)
@@ -431,14 +437,17 @@ def _encode_unsigned(value: Fraction) -> int:
             else:
                 bits.append(0)
 
-        # Round-to-nearest-even using bit 16 (the round bit) and remaining f
-        if len(bits) > 15:
-            round_bit = bits[15]
-            bits = bits[:15]
-            # Tie case: round-to-even (look at LSB; if odd, round up)
-            if round_bit == 1 and (f > 0 or bits[14] == 1):
-                # Round up by adding 1 to the field
-                pass  # simplification: skip exact tie-break for POC
+        # Inspect the round bit (bits[15]) and any sticky residue (`f` > 0)
+        # so we can either drop them (truncate) or apply RTNE.
+        round_bit = bits[15] if len(bits) > 15 else 0
+        bits = bits[:15]
+
+        if mode == "rtne":
+            # Standard IEEE-754-style round-to-nearest-ties-to-even:
+            #   round up if guard=1 AND (sticky=1 OR LSB=1)
+            sticky = f > 0
+            lsb_odd = bits[14] == 1
+            round_up = round_bit == 1 and (sticky or lsb_odd)
 
     # Pack 15 bits into integer
     out = 0
@@ -446,10 +455,20 @@ def _encode_unsigned(value: Fraction) -> int:
         out = (out << 1) | b
     # Pad if regime+exp+frac < 15 (shouldn't happen normally)
     out <<= (15 - len(bits))
-    return out & 0x7FFF
+    out &= 0x7FFF
+
+    if mode == "rtne" and round_up and out < 0x7FFF:
+        # Increment the field; saturate at maxPos (0x7FFF) instead of wrapping.
+        out += 1
+
+    return out
 
 
-def encode_bposit16(value: Fraction | int | float) -> int:
+def encode_bposit16(value: Fraction | int | float, mode: str = "truncate") -> int:
+    """Encode a number as a 16-bit bposit. ``mode`` is forwarded to
+    :func:`_encode_unsigned` — see its docstring for the truncate-vs-RTNE
+    semantics. Default ``"truncate"`` preserves bit-exact equivalence with
+    the existing CUDA encoder and the baked LUTs."""
     if isinstance(value, float):
         # Boundary conversion only — for test inputs.
         if value == 0:
@@ -460,7 +479,7 @@ def encode_bposit16(value: Fraction | int | float) -> int:
     if value == 0:
         return ZERO
     sign = 1 if value < 0 else 0
-    abs_field = _encode_unsigned(abs(value))
+    abs_field = _encode_unsigned(abs(value), mode=mode)
     if sign:
         abs_field = ((~abs_field) + 1) & 0x7FFF
     return ((sign << 15) | abs_field) & 0xFFFF
