@@ -1,6 +1,3 @@
-// Copyright (c) 2026 Ry Bruscoe and Anomly, Inc.
-// SPDX-License-Identifier: Apache-2.0
-
 // bench_imma_vs_qmma.cu — measured throughput of INT8 IMMA vs BF16 (which
 // cuBLASLt routes through FP4 QMMA on Blackwell, per the morning's SASS RE)
 // at the same GEMM shape, on the same GPU. The headline question:
@@ -187,16 +184,18 @@ int main(int argc, char** argv) {
 
     // ---- Report ----
     std::printf("=== %d×%d×%d GEMM throughput, cuBLASLt heuristic algo[0] ===\n", M, N, K);
-    auto print = [&](const BenchResult& r) {
+    auto print = [&](const BenchResult& r, const char* unit) {
         if (!r.ok) {
             std::printf("  %-50s  %s\n", r.label, "[no algo selected]");
             return;
         }
-        std::printf("  %-50s  ms=%7.3f  TOPS=%6.1f  TFLOPS=%6.1f  (reps=%d)\n",
-                    r.label, r.ms_avg, r.tops, r.tflops, r.n_repeats);
+        std::printf("  %-50s  ms=%7.3f  TOPS=%6.1f  %s=%6.1f  (reps=%d)\n",
+                    r.label, r.ms_avg, r.tops, unit, r.tflops, r.n_repeats);
     };
-    print(r_bf);
-    print(r_i8);
+    // BF16 in/out → FP4 QMMA on sm_120: IEEE float, TFLOPS.
+    // INT8 in / INT32 out → IMMA bposit-via-IMMA path: posit, TPOPS.
+    print(r_bf, "TFLOPS");
+    print(r_i8, "TPOPS");
 
     if (r_bf.ok && r_i8.ok) {
         double ratio = r_i8.tops / r_bf.tops;

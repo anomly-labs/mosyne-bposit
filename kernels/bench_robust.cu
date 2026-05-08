@@ -1,6 +1,3 @@
-// Copyright (c) 2026 Ry Bruscoe and Anomly, Inc.
-// SPDX-License-Identifier: Apache-2.0
-
 // bench_robust.cu — rigorous matmul bench with trial variance + cuBLASLt
 // algorithm sweep. Replaces single-shot bench_imma_vs_qmma for whitepaper
 // numbers that need to survive scrutiny.
@@ -273,15 +270,15 @@ int main(int argc, char** argv) {
                           CUBLAS_COMPUTE_32I, CUDA_R_32I,
                           dA_i8, dB_i8, dC_i32, dWS, ws, &algo_i8, n_trials, n_reps);
 
-    auto print = [](const char* label, const Stats& s) {
+    auto print = [](const char* label, const Stats& s, const char* unit) {
         if (!s.ok) { std::printf("  %-44s [no algo]\n", label); return; }
-        std::printf("  %-44s ms=%7.4f ± %5.4f  (min %.4f / max %.4f)  TFLOPS=%6.1f (range %.1f–%.1f)\n",
+        std::printf("  %-44s ms=%7.4f ± %5.4f  (min %.4f / max %.4f)  %s=%6.1f (range %.1f–%.1f)\n",
                     label, s.mean_ms, s.std_ms, s.min_ms, s.max_ms,
-                    s.mean_tflops, s.min_tflops, s.max_tflops);
+                    unit, s.mean_tflops, s.min_tflops, s.max_tflops);
     };
     std::printf("=== heuristic algo[0], %d trials × %d reps ===\n", n_trials, n_reps);
-    print("BF16 in/out, F32 accum (HMMA path)", bf);
-    print("INT8 in, INT32 out (IMMA path)",      i8);
+    print("BF16 in/out, F32 accum (HMMA path)", bf, "TFLOPS");
+    print("INT8 in, INT32 out (IMMA path)",     i8, "TPOPS");
 
     if (bf.ok && i8.ok) {
         double ratio = bf.mean_ms / i8.mean_ms;   // ratio > 1 → INT8 faster
