@@ -37,6 +37,7 @@
 
 #include <cuda_runtime.h>
 #include <cuda_bf16.h>
+#include <cuda_fp16.h>
 #include <cublasLt.h>
 #include <cstdint>
 #include <cstdio>
@@ -179,6 +180,7 @@ extern "C" int mosyne_bposit_quantize_weight_per_channel(
 template<typename T> __device__ __forceinline__ float to_float(T v);
 template<> __device__ __forceinline__ float to_float<float>(float v) { return v; }
 template<> __device__ __forceinline__ float to_float<__nv_bfloat16>(__nv_bfloat16 v) { return __bfloat162float(v); }
+template<> __device__ __forceinline__ float to_float<__half>(__half v) { return __half2float(v); }
 
 template<int THREADS, typename T>
 __global__ void k_per_token_quantize_fused(
@@ -224,6 +226,7 @@ __global__ void k_per_token_quantize_fused(
 template<typename T> __device__ __forceinline__ T from_float(float v);
 template<> __device__ __forceinline__ float from_float<float>(float v) { return v; }
 template<> __device__ __forceinline__ __nv_bfloat16 from_float<__nv_bfloat16>(float v) { return __float2bfloat16(v); }
+template<> __device__ __forceinline__ __half from_float<__half>(float v) { return __float2half(v); }
 
 template<typename T>
 __global__ void k_dequant(const int32_t* y_int, T* y_out,
@@ -377,6 +380,63 @@ extern "C" int mosyne_bposit_linear_w8a8_bf16_io(
     if (rc == 0) {
         k_dequant<__nv_bfloat16><<<(M*N + t - 1) / t, t>>>(
             g_d_y_i32, d_y_bf16, M, N, g_d_x_scale, d_w_scale);
+    }
+    return rc;
+}
+
+// ---- Public: device-pointer linear, fp16 input ----------------------------
+// Symmetric to mosyne_bposit_linear_w8a8_bf16: column-major fp16 input,
+// fp32 output. For deployments running fp16 (older transformer stacks,
+// some inference servers) this skips the fp16→fp32 cast at the boundary.
+extern "C" int mosyne_bposit_linear_w8a8_fp16(
+    const __half* d_x_fp16, int M, int K,
+    const int8_t* d_w_i8, const float* d_w_scale, int N,
+    float* d_y_fp32)
+{
+    if (!g_lt) return -10;
+    if (ensure_buffer((void**)&g_d_x_scale, &g_d_x_scale_bytes,
+                      (size_t)M * sizeof(float))) return -11;
+    if (ensure_buffer((void**)&g_d_x_i8, &g_d_x_i8_bytes,
+                      (size_t)M * (size_t)K * sizeof(int8_t))) return -11;
+    if (ensure_buffer((void**)&g_d_y_i32, &g_d_y_i32_bytes,
+                      (size_t)M * (size_t)N * sizeof(int32_t))) return -11;
+
+    constexpr int FUSED_THREADS = 256;
+    k_per_token_quantize_fused<FUSED_THREADS, __half><<<M, FUSED_THREADS>>>(
+        d_x_fp16, M, K, g_d_x_i8, g_d_x_scale);
+    int t = 256;
+    int rc = matmul_int8_inplace(M, N, K, g_d_x_i8, d_w_i8, g_d_y_i32);
+    if (rc == 0) {
+        k_dequant<float><<<(M*N + t - 1) / t, t>>>(
+            g_d_y_i32, d_y_fp32, M, N, g_d_x_scale, d_w_scale);
+    }
+    return rc;
+}
+
+// ---- Public: device-pointer linear, fp16 input AND fp16 output -------------
+// Fully fp16-native hot path: skips both the fp16→fp32 input cast and the
+// fp32→fp16 output cast. Symmetric to the bf16_io entry point.
+extern "C" int mosyne_bposit_linear_w8a8_fp16_io(
+    const __half* d_x_fp16, int M, int K,
+    const int8_t* d_w_i8, const float* d_w_scale, int N,
+    __half* d_y_fp16)
+{
+    if (!g_lt) return -10;
+    if (ensure_buffer((void**)&g_d_x_scale, &g_d_x_scale_bytes,
+                      (size_t)M * sizeof(float))) return -11;
+    if (ensure_buffer((void**)&g_d_x_i8, &g_d_x_i8_bytes,
+                      (size_t)M * (size_t)K * sizeof(int8_t))) return -11;
+    if (ensure_buffer((void**)&g_d_y_i32, &g_d_y_i32_bytes,
+                      (size_t)M * (size_t)N * sizeof(int32_t))) return -11;
+
+    constexpr int FUSED_THREADS = 256;
+    k_per_token_quantize_fused<FUSED_THREADS, __half><<<M, FUSED_THREADS>>>(
+        d_x_fp16, M, K, g_d_x_i8, g_d_x_scale);
+    int t = 256;
+    int rc = matmul_int8_inplace(M, N, K, g_d_x_i8, d_w_i8, g_d_y_i32);
+    if (rc == 0) {
+        k_dequant<__half><<<(M*N + t - 1) / t, t>>>(
+            g_d_y_i32, d_y_fp16, M, N, g_d_x_scale, d_w_scale);
     }
     return rc;
 }

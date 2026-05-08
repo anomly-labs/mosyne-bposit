@@ -70,6 +70,18 @@ def _ensure_library() -> ctypes.CDLL:
         ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int,
         ctypes.c_void_p,
     ]
+    _lib.mosyne_bposit_linear_w8a8_fp16.restype = ctypes.c_int
+    _lib.mosyne_bposit_linear_w8a8_fp16.argtypes = [
+        ctypes.c_void_p, ctypes.c_int, ctypes.c_int,
+        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int,
+        ctypes.c_void_p,
+    ]
+    _lib.mosyne_bposit_linear_w8a8_fp16_io.restype = ctypes.c_int
+    _lib.mosyne_bposit_linear_w8a8_fp16_io.argtypes = [
+        ctypes.c_void_p, ctypes.c_int, ctypes.c_int,
+        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int,
+        ctypes.c_void_p,
+    ]
     rc = _lib.mosyne_bposit_init()
     if rc != 0:
         raise RuntimeError(f"mosyne_bposit_init failed (rc={rc})")
@@ -190,6 +202,43 @@ def linear_w8a8_dev_bf16_io(
     )
     if rc != 0:
         raise RuntimeError(f"mosyne_bposit_linear_w8a8_bf16_io failed (rc={rc})")
+
+
+def linear_w8a8_dev_fp16(
+    x_fp16_dev_ptr: int, M: int, K: int,
+    w_i8_dev_ptr: int, w_scale_dev_ptr: int, N: int,
+    y_fp32_dev_ptr: int,
+) -> None:
+    """W8A8 linear with fp16 input — symmetric to :func:`linear_w8a8_dev_bf16`
+    but for half-precision (IEEE fp16) inputs. Output stays fp32.
+    """
+    lib = _ensure_library()
+    rc = lib.mosyne_bposit_linear_w8a8_fp16(
+        ctypes.c_void_p(x_fp16_dev_ptr), M, K,
+        ctypes.c_void_p(w_i8_dev_ptr), ctypes.c_void_p(w_scale_dev_ptr), N,
+        ctypes.c_void_p(y_fp32_dev_ptr),
+    )
+    if rc != 0:
+        raise RuntimeError(f"mosyne_bposit_linear_w8a8_fp16 failed (rc={rc})")
+
+
+def linear_w8a8_dev_fp16_io(
+    x_fp16_dev_ptr: int, M: int, K: int,
+    w_i8_dev_ptr: int, w_scale_dev_ptr: int, N: int,
+    y_fp16_dev_ptr: int,
+) -> None:
+    """W8A8 linear with fp16 input AND fp16 output — fully fp16-native hot
+    path. ``x`` and ``y`` are column-major IEEE half-precision. Symmetric
+    to :func:`linear_w8a8_dev_bf16_io`.
+    """
+    lib = _ensure_library()
+    rc = lib.mosyne_bposit_linear_w8a8_fp16_io(
+        ctypes.c_void_p(x_fp16_dev_ptr), M, K,
+        ctypes.c_void_p(w_i8_dev_ptr), ctypes.c_void_p(w_scale_dev_ptr), N,
+        ctypes.c_void_p(y_fp16_dev_ptr),
+    )
+    if rc != 0:
+        raise RuntimeError(f"mosyne_bposit_linear_w8a8_fp16_io failed (rc={rc})")
 
 
 def shutdown() -> None:

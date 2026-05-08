@@ -74,6 +74,7 @@ from ._api import (
     linear_w8a8,
     linear_w8a8_dev,
     linear_w8a8_dev_bf16_io,
+    linear_w8a8_dev_fp16_io,
     quantize_weight_per_channel_dev,
 )
 
@@ -176,13 +177,23 @@ class BPositLinear(nn.Module):
             # so the dtype cast and the layout swap fuse into a single CUDA
             # kernel each, saving ~17 µs per forward at FFN-gate (measured).
             #
-            # bf16 input + bf16 output is the no-cast hot path — both
-            # quantize and dequant kernels operate in bf16 directly.
+            # bf16 input + bf16 output is the no-cast hot path; fp16 has
+            # a symmetric path. Anything else (fp32, fp64) goes through
+            # the cast-to-fp32 fallback.
             if x_flat.dtype == torch.bfloat16:
                 x_cm = torch.empty((K, M), dtype=torch.bfloat16, device=x_flat.device)
                 x_cm.copy_(x_flat.t())
                 y_cm = torch.empty((N, M), dtype=torch.bfloat16, device=x_flat.device)
                 linear_w8a8_dev_bf16_io(
+                    x_cm.data_ptr(), M, K,
+                    self._w_i8_buf.data_ptr(), self._w_scale_buf.data_ptr(), N,
+                    y_cm.data_ptr(),
+                )
+            elif x_flat.dtype == torch.float16:
+                x_cm = torch.empty((K, M), dtype=torch.float16, device=x_flat.device)
+                x_cm.copy_(x_flat.t())
+                y_cm = torch.empty((N, M), dtype=torch.float16, device=x_flat.device)
+                linear_w8a8_dev_fp16_io(
                     x_cm.data_ptr(), M, K,
                     self._w_i8_buf.data_ptr(), self._w_scale_buf.data_ptr(), N,
                     y_cm.data_ptr(),

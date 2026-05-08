@@ -108,6 +108,29 @@ def test_bf16_input_matches_fp32_input_within_quant_noise():
     )
 
 
+def test_fp16_input_matches_fp32_input_within_quant_noise():
+    """The fp16-direct device path should produce results within fp16
+    round-trip tolerance of the fp32 path. fp16 has more mantissa bits
+    than bf16 (10 vs 7) so the tolerance is tighter."""
+    from mosyne_bposit.torch_compat import BPositLinear
+
+    torch.manual_seed(0)
+    M, K, N = 32, 512, 1024
+    w = torch.randn(N, K, device="cuda", dtype=torch.float32) * (1.0 / K ** 0.5)
+    x_fp32 = torch.randn(M, K, device="cuda", dtype=torch.float32) * 0.5
+    x_fp16 = x_fp32.to(torch.float16)
+
+    mod = BPositLinear(weight=w)
+    y_fp32 = mod(x_fp32)
+    y_fp16 = mod(x_fp16).to(torch.float32)
+
+    rel = (y_fp32 - y_fp16).abs().max() / y_fp32.abs().max()
+    assert rel.item() < 1e-2, (
+        f"fp16-input path diverged from fp32-input path by {rel.item()*100:.2f}%; "
+        f"both should produce results within fp16 round-trip noise"
+    )
+
+
 def test_device_path_module_repr_indicates_device():
     """extra_repr should advertise which path the module is wired to use,
     so users can confirm at a glance that they're getting the no-host-roundtrip
