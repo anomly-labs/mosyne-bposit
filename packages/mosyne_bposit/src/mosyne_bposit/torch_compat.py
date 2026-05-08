@@ -1,6 +1,3 @@
-# Copyright (c) 2026 Ry Bruscoe and Anomly, Inc.
-# SPDX-License-Identifier: Apache-2.0
-
 """mosyne_bposit.torch_compat — drop-in PyTorch integration.
 
 This module is imported only when ``torch`` is available; importing it
@@ -21,15 +18,42 @@ Public API
     Returns the modified module.  Use to convert FFN / projection
     layers of a Hugging Face transformers model in place.
 
-Caveats
--------
+Behaviour
+---------
 
-The current implementation routes through the host-side ``linear_w8a8``
-entry point, which means every forward pass copies the input from GPU
-to CPU and back.  This is fine for accuracy validation but adds latency
-that the underlying CUDA library does not have.  A future tick will
-expose the device-pointer entry point so PyTorch tensors stay on the
-GPU end-to-end.
+When a ``BPositLinear`` is constructed from a CUDA-resident weight, the
+weight is quantized to int8 on the device once at construction time and
+stored as device-resident buffers. Forward passes whose input tensor
+also lives on CUDA route through the device-pointer entry point — no
+host roundtrip, no per-call weight re-upload — so PyTorch tensors stay
+on the GPU end-to-end.
+
+Forward dispatches on input dtype:
+
+* ``bfloat16`` input → fully bf16-native hot path
+  (``linear_w8a8_dev_bf16_io``). The per-token quantize kernel reads
+  bf16 directly and the dequantize kernel emits bf16 directly, so no
+  fp32 buffer is allocated in the inner loop. This is the realistic
+  deployment path; on a Llama-class FFN-gate shape
+  (M=128, K=4096, N=11008, RTX 3090) it runs at ~0.33 ms/call.
+
+* Any other floating dtype (fp32, fp16, fp64) → cast-to-fp32 path
+  (``linear_w8a8_dev``). The input is cast and transposed in a single
+  fused PyTorch kernel before entering the library; the output is
+  produced in fp32 and cast back to the caller's dtype. Slightly
+  slower than the bf16-native path but bit-exactly equivalent.
+
+End-to-end on autoregressive ``Qwen2.5-Coder-1.5B-Instruct`` token
+generation with all 84 FFN linears swapped, the bf16 path matches the
+``bf16`` ``nn.Linear`` baseline within run-to-run noise (133.2 vs 132.8
+tok/s, +0.3%; see ``examples/qwen_generate_bench.py``).
+
+The host-fallback path is meaningfully slower — not because of host
+roundtrip per se, but because the underlying ``linear_w8a8_host`` C
+entry point uploads + per-channel-quantizes the fp32 weight on every
+call (that's its accuracy-validation contract). That path is for
+validating numerics on hosts where you don't want to keep the weight
+resident; it is not a fair latency baseline.
 """
 from __future__ import annotations
 
@@ -46,15 +70,23 @@ except ImportError as e:  # pragma: no cover — only triggered without torch
 
 import numpy as np
 
-from ._api import linear_w8a8
+from ._api import (
+    linear_w8a8,
+    linear_w8a8_dev,
+    linear_w8a8_dev_bf16_io,
+    quantize_weight_per_channel_dev,
+)
 
 
 class BPositLinear(nn.Module):
     """Drop-in W8A8 replacement for ``nn.Linear`` using bposit-IMMA.
 
-    Weight quantisation is done at construction time and stored on the
-    host side as ``self._w_fp32`` (float32, contiguous).  Inputs are
-    copied to host on every forward pass — see *Caveats* above.
+    Weight quantisation is done at construction time. If the source weight
+    lives on a CUDA device, the int8 weight + scale buffers are kept on
+    that device, and forward passes with CUDA-resident inputs route
+    through the device-pointer pipeline (no host roundtrip). For
+    host-resident weights or inputs the module falls back to the
+    host-pointer entry point — useful for accuracy validation.
 
     Parameters
     ----------
@@ -69,25 +101,57 @@ class BPositLinear(nn.Module):
             raise ValueError(f"weight must be 2-D (got shape {tuple(weight.shape)})")
         # PyTorch nn.Linear stores weight as [out, in].  Our linear_w8a8
         # expects (M,K) @ (K,N), where K = in_features and N = out_features.
-        # So we take the transpose and store as [in, out] float32.
-        w_fp32 = weight.detach().to(torch.float32).t().contiguous().cpu().numpy()
-        # Register as a non-trainable buffer so .to() / .cuda() etc. don't move it
-        # (it lives on host — the bposit-IMMA pipeline allocates its own device buffers).
-        self.register_buffer("_w_fp32_buf", torch.from_numpy(w_fp32), persistent=False)
+        # So we take the transpose and store as [in, out] (column-major
+        # is what the underlying library expects, equivalent to row-major
+        # of the transposed shape).
+        K = weight.shape[1]
+        N = weight.shape[0]
+        self.in_features = K
+        self.out_features = N
+        self._cuda_device: Optional[torch.device] = None
+
+        if weight.is_cuda:
+            # Quantize weights on the device once at construction time.
+            # Library expects column-major [K, N], which is identical in
+            # memory to row-major [N, K] — the storage shape of the source
+            # nn.Linear weight. So we just keep weight.contiguous() and
+            # treat its data_ptr as col-major [K, N] for the library.
+            w_fp32 = weight.detach().to(torch.float32).contiguous()  # [N, K] row-major
+            w_i8 = torch.empty((N, K), dtype=torch.int8, device=weight.device)
+            w_scale = torch.empty((N,), dtype=torch.float32, device=weight.device)
+            quantize_weight_per_channel_dev(
+                w_fp32.data_ptr(), K, N,
+                w_i8.data_ptr(), w_scale.data_ptr(),
+            )
+            self.register_buffer("_w_i8_buf", w_i8, persistent=False)
+            self.register_buffer("_w_scale_buf", w_scale, persistent=False)
+            # Stash a host-side fp32 weight in the host-path layout (numpy
+            # [K, N] row-major) so the host-fallback path can reuse it.
+            self.register_buffer(
+                "_w_fp32_buf",
+                weight.detach().to(torch.float32).t().contiguous().cpu(),
+                persistent=False,
+            )
+            self._cuda_device = weight.device
+        else:
+            # Host-only path: keep fp32 weight in host-path layout (numpy
+            # [K, N] row-major), fall back to host entry point.
+            w_fp32 = weight.detach().to(torch.float32).t().contiguous().cpu()
+            self.register_buffer("_w_fp32_buf", w_fp32, persistent=False)
+            self._w_i8_buf = None
+            self._w_scale_buf = None
+
         if bias is not None:
-            b = bias.detach().to(torch.float32).cpu().numpy()
-            self.register_buffer("_b_fp32_buf", torch.from_numpy(b.copy()), persistent=False)
+            b = bias.detach().to(torch.float32)
+            self.register_buffer("_b_fp32_buf", b.contiguous(), persistent=False)
         else:
             self._b_fp32_buf = None
-        self.in_features = weight.shape[1]
-        self.out_features = weight.shape[0]
 
     @classmethod
     def from_linear(cls, linear: nn.Linear) -> "BPositLinear":
         return cls(weight=linear.weight, bias=linear.bias)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # x: (..., in_features) → flatten to (M, K), apply, reshape
         orig_shape = x.shape
         K = orig_shape[-1]
         if K != self.in_features:
@@ -95,16 +159,63 @@ class BPositLinear(nn.Module):
                 f"input last dim {K} does not match in_features {self.in_features}"
             )
         x_flat = x.reshape(-1, K)
-        x_np = x_flat.detach().to(torch.float32).cpu().numpy()
-        w_np = self._w_fp32_buf.numpy()
-        y_np = linear_w8a8(x_np, w_np)            # (M, out_features)
-        y = torch.from_numpy(y_np).to(x.device).to(x.dtype)
+        M = x_flat.shape[0]
+        N = self.out_features
+
+        if (
+            x_flat.is_cuda
+            and self._w_i8_buf is not None
+            and self._w_scale_buf is not None
+            and x_flat.device == self._cuda_device
+        ):
+            # Device-native path — no host roundtrip.
+            # Library expects column-major inputs/outputs, which is
+            # equivalent in memory to row-major [K, M] / [N, M].
+            #
+            # Use empty + copy_(transposed source) instead of .t().contiguous()
+            # so the dtype cast and the layout swap fuse into a single CUDA
+            # kernel each, saving ~17 µs per forward at FFN-gate (measured).
+            #
+            # bf16 input + bf16 output is the no-cast hot path — both
+            # quantize and dequant kernels operate in bf16 directly.
+            if x_flat.dtype == torch.bfloat16:
+                x_cm = torch.empty((K, M), dtype=torch.bfloat16, device=x_flat.device)
+                x_cm.copy_(x_flat.t())
+                y_cm = torch.empty((N, M), dtype=torch.bfloat16, device=x_flat.device)
+                linear_w8a8_dev_bf16_io(
+                    x_cm.data_ptr(), M, K,
+                    self._w_i8_buf.data_ptr(), self._w_scale_buf.data_ptr(), N,
+                    y_cm.data_ptr(),
+                )
+            else:
+                x_cm = torch.empty((K, M), dtype=torch.float32, device=x_flat.device)
+                x_cm.copy_(x_flat.t())  # cast (any → fp32) + transpose, fused
+                y_cm = torch.empty((N, M), dtype=torch.float32, device=x_flat.device)
+                linear_w8a8_dev(
+                    x_cm.data_ptr(), M, K,
+                    self._w_i8_buf.data_ptr(), self._w_scale_buf.data_ptr(), N,
+                    y_cm.data_ptr(),
+                )
+            y = torch.empty((M, N), dtype=x.dtype, device=x_flat.device)
+            y.copy_(y_cm.t())  # col-major → x.dtype row-major, fused
+        else:
+            # Host fallback (host weight, or input on a different device).
+            x_np = x_flat.detach().to(torch.float32).cpu().numpy()
+            w_np = self._w_fp32_buf.numpy()
+            y_np = linear_w8a8(x_np, w_np)
+            y = torch.from_numpy(y_np).to(x.device).to(x.dtype)
+
         if self._b_fp32_buf is not None:
-            y = y + self._b_fp32_buf.to(x.device).to(x.dtype)
-        return y.reshape(*orig_shape[:-1], self.out_features)
+            y = y + self._b_fp32_buf.to(y.device).to(y.dtype)
+        return y.reshape(*orig_shape[:-1], N)
 
     def extra_repr(self) -> str:
-        return f"in_features={self.in_features}, out_features={self.out_features}, has_bias={self._b_fp32_buf is not None}, dtype=W8A8(bposit-IMMA)"
+        path = "device" if self._w_i8_buf is not None else "host-fallback"
+        return (
+            f"in_features={self.in_features}, out_features={self.out_features}, "
+            f"has_bias={self._b_fp32_buf is not None}, dtype=W8A8(bposit-IMMA), "
+            f"path={path}"
+        )
 
 
 def replace_linear_modules(

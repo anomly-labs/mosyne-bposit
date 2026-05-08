@@ -1,6 +1,3 @@
-// Copyright (c) 2026 Ry Bruscoe and Anomly, Inc.
-// SPDX-License-Identifier: Apache-2.0
-
 // bposit16_encode.cuh — quire256 + bposit16 encode/add/mul device functions.
 //
 // Self-contained header for the 5-DST CUDA toolkit. Provides:
@@ -203,6 +200,220 @@ __device__ inline std::uint16_t quire256_to_bposit16(quire256 q) {
     std::uint16_t result = ((std::uint16_t)(sign ? 1 : 0) << 15) | (std::uint16_t)magnitude;
 
     if (result == BP16_NAR && !sign) return MAXPOS;
+    return result;
+}
+
+// =============================================================================
+// quire256_to_bposit16_rtne — round-to-nearest, ties-to-even sibling of
+// quire256_to_bposit16. Bit-exact against bposit16_reference.encode_bposit16(
+// value, mode="rtne") for every value the Python reference accepts.
+//
+// Differs from the truncate path only at the final fraction-extraction step:
+// instead of dropping bits below position `lo` of the quire, this variant
+// inspects the round bit (quire[lo-1]) and a sticky bit (OR of quire[0..lo-2])
+// and increments the magnitude when standard IEEE-754-style "round to nearest,
+// ties to even" applies. Saturates at 0x7FFF rather than wrapping into the
+// sign bit, matching the Python reference.
+//
+// Stage 2 of closing the §7 RTNE limitation called out in the whitepaper
+// (stage 1 was 38e2981 — opt-in mode flag in the Python reference).
+// =============================================================================
+__device__ inline std::uint16_t quire256_to_bposit16_rtne(quire256 q) {
+    constexpr int QUIRE_FRAC_BITS = 96;
+    constexpr std::uint16_t BP16_ZERO = 0x0000;
+    constexpr std::uint16_t BP16_NAR  = 0x8000;
+    constexpr std::uint16_t MAXPOS    = 0x7FFF;
+    constexpr std::uint16_t MAXNEG    = 0x8001;
+    constexpr std::uint16_t MINPOS    = 0x0001;
+    constexpr std::uint16_t MINNEG    = 0xFFFF;
+
+    if (q256_is_zero(q)) return BP16_ZERO;
+
+    bool sign = q256_sign(q);
+    if (sign) q = q256_negate(q);
+
+    int msb = q256_find_msb(q);
+    if (msb < 0) return BP16_ZERO;
+
+    int scale = msb - QUIRE_FRAC_BITS;
+    if (scale >  48) return sign ? MAXNEG : MAXPOS;
+    if (scale < -48) return sign ? MINNEG : MINPOS;
+
+    int k, e;
+    if (scale >= 0) {
+        k = scale >> 3;
+        e = scale - (k << 3);
+    } else {
+        int abs_s = -scale;
+        int abs_k = abs_s >> 3;
+        int abs_e = abs_s - (abs_k << 3);
+        if (abs_e == 0) {
+            k = -abs_k;
+            e = 0;
+        } else {
+            k = -abs_k - 1;
+            e = 8 - abs_e;
+        }
+    }
+
+    std::uint32_t magnitude = 0;
+    int top_pos;
+    int regime_bits;
+    if (k >= 0) {
+        int ones_count = k + 1;
+        if (ones_count > 14) ones_count = 14;
+        regime_bits = ones_count + 1;
+        if (regime_bits > 15) regime_bits = 15;
+        magnitude |= ((1U << ones_count) - 1U) << (15 - ones_count);
+        top_pos = 14 - regime_bits;
+    } else {
+        int zeros_count = -k;
+        if (zeros_count >= 15) zeros_count = 14;
+        regime_bits = zeros_count + 1;
+        int term_pos = 14 - zeros_count;
+        magnitude |= 1U << term_pos;
+        top_pos = term_pos - 1;
+    }
+
+    int exp_bits_avail = top_pos + 1;
+    int exp_bits = (exp_bits_avail >= 3) ? 3 : (exp_bits_avail > 0 ? exp_bits_avail : 0);
+    if (exp_bits > 0) {
+        std::uint32_t e_aligned = (std::uint32_t)e >> (3 - exp_bits);
+        magnitude |= e_aligned << (top_pos - exp_bits + 1);
+        top_pos -= exp_bits;
+    }
+
+    int frac_bits = (top_pos >= 0) ? (top_pos + 1) : 0;
+    std::uint32_t frac_field = 0;
+    int lo = 0;
+    if (frac_bits > 0) {
+        int hi = msb - 1;
+        lo = msb - frac_bits;
+        if (lo >= 0) {
+            frac_field = q256_extract_bits(q, lo, hi);
+        } else {
+            frac_field = q256_extract_bits(q, 0, hi) << (-lo);
+        }
+        magnitude |= frac_field;
+
+        // RTNE: round_bit = quire[lo-1]; sticky = OR(quire[0..lo-2]).
+        // round_up iff round_bit && (sticky || lsb_of_kept_field_is_odd).
+        // Python reference matches; saturate at 0x7FFF rather than rolling
+        // into the sign bit. lo <= 0 means the left-shift filled in zeros
+        // and there is no information below the kept fraction — no rounding.
+        if (lo > 0) {
+            bool round_bit = q256_get_bit(q, lo - 1);
+            bool sticky    = q256_any_below(q, lo - 1);
+            bool lsb_odd   = (frac_field & 1U) != 0;
+            if (round_bit && (sticky || lsb_odd)) {
+                if (magnitude < 0x7FFFU) magnitude += 1U;
+            }
+        }
+    }
+
+    if (magnitude >= 0x8000U) magnitude = 0x7FFFU;
+
+    if (sign) magnitude = ((~magnitude) + 1U) & 0x7FFFU;
+    std::uint16_t result = ((std::uint16_t)(sign ? 1 : 0) << 15) | (std::uint16_t)magnitude;
+
+    if (result == BP16_NAR && !sign) return MAXPOS;
+    return result;
+}
+
+// =============================================================================
+// quire256_to_bposit32 — native bposit32 encoder, bit-exact against the Python
+// reference's encode_bposit32 (truncate mode, the default).
+//
+// Mirrors quire256_to_bposit16 at 32-bit width: same 96-bit fixed-point window,
+// same scale range (±48), same eS=3 exponent. The 31-bit magnitude field
+// preserves up to ~26 fraction bits at small regimes, vs ~10 for bposit16, so
+// values that aren't exactly representable in bposit16 retain ~3-4 orders of
+// magnitude more precision when encoded directly to bposit32.
+// =============================================================================
+__device__ inline std::uint32_t quire256_to_bposit32(quire256 q) {
+    constexpr int QUIRE_FRAC_BITS = 96;
+    constexpr std::uint32_t BP32_ZERO = 0x00000000U;
+    constexpr std::uint32_t BP32_NAR  = 0x80000000U;
+    constexpr std::uint32_t MAXPOS    = 0x7FFFFFFFU;
+    constexpr std::uint32_t MAXNEG    = 0x80000001U;
+    constexpr std::uint32_t MINPOS    = 0x00000001U;
+    constexpr std::uint32_t MINNEG    = 0xFFFFFFFFU;
+
+    if (q256_is_zero(q)) return BP32_ZERO;
+
+    bool sign = q256_sign(q);
+    if (sign) q = q256_negate(q);
+
+    int msb = q256_find_msb(q);
+    if (msb < 0) return BP32_ZERO;
+
+    int scale = msb - QUIRE_FRAC_BITS;
+    if (scale >  48) return sign ? MAXNEG : MAXPOS;
+    if (scale < -48) return sign ? MINNEG : MINPOS;
+
+    int k, e;
+    if (scale >= 0) {
+        k = scale >> 3;
+        e = scale - (k << 3);
+    } else {
+        int abs_s = -scale;
+        int abs_k = abs_s >> 3;
+        int abs_e = abs_s - (abs_k << 3);
+        if (abs_e == 0) {
+            k = -abs_k;
+            e = 0;
+        } else {
+            k = -abs_k - 1;
+            e = 8 - abs_e;
+        }
+    }
+
+    std::uint32_t magnitude = 0;
+    int top_pos;
+    int regime_bits;
+    if (k >= 0) {
+        int ones_count = k + 1;
+        if (ones_count > 30) ones_count = 30;
+        regime_bits = ones_count + 1;
+        if (regime_bits > 31) regime_bits = 31;
+        magnitude |= ((1U << ones_count) - 1U) << (31 - ones_count);
+        top_pos = 30 - regime_bits;
+    } else {
+        int zeros_count = -k;
+        if (zeros_count >= 31) zeros_count = 30;
+        regime_bits = zeros_count + 1;
+        int term_pos = 30 - zeros_count;
+        magnitude |= 1U << term_pos;
+        top_pos = term_pos - 1;
+    }
+
+    int exp_bits_avail = top_pos + 1;
+    int exp_bits = (exp_bits_avail >= 3) ? 3 : (exp_bits_avail > 0 ? exp_bits_avail : 0);
+    if (exp_bits > 0) {
+        std::uint32_t e_aligned = (std::uint32_t)e >> (3 - exp_bits);
+        magnitude |= e_aligned << (top_pos - exp_bits + 1);
+        top_pos -= exp_bits;
+    }
+
+    int frac_bits = (top_pos >= 0) ? (top_pos + 1) : 0;
+    if (frac_bits > 0) {
+        int hi = msb - 1;
+        int lo = msb - frac_bits;
+        std::uint32_t frac_field;
+        if (lo >= 0) {
+            frac_field = q256_extract_bits(q, lo, hi);
+        } else {
+            frac_field = q256_extract_bits(q, 0, hi) << (-lo);
+        }
+        magnitude |= frac_field;
+    }
+
+    if (magnitude >= 0x80000000U) magnitude = 0x7FFFFFFFU;
+
+    if (sign) magnitude = ((~magnitude) + 1U) & 0x7FFFFFFFU;
+    std::uint32_t result = ((std::uint32_t)(sign ? 1 : 0) << 31) | magnitude;
+
+    if (result == BP32_NAR && !sign) return MAXPOS;
     return result;
 }
 

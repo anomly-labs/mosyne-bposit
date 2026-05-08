@@ -1,6 +1,3 @@
-# Copyright (c) 2026 Ry Bruscoe and Anomly, Inc.
-# SPDX-License-Identifier: Apache-2.0
-
 """ctypes wrapper around libmosyne_bposit.so.
 
 The shared library is built once at install time by mosyne-bposit-build,
@@ -48,6 +45,31 @@ def _ensure_library() -> ctypes.CDLL:
         ctypes.POINTER(ctypes.c_float), ctypes.c_int,
         ctypes.POINTER(ctypes.c_float),
     ]
+    # Device-pointer entry points — accept raw void* (uintptr_t) so callers
+    # can pass torch.Tensor.data_ptr() directly without ctypes-cast gymnastics.
+    _lib.mosyne_bposit_quantize_weight_per_channel.restype = ctypes.c_int
+    _lib.mosyne_bposit_quantize_weight_per_channel.argtypes = [
+        ctypes.c_void_p, ctypes.c_int, ctypes.c_int,
+        ctypes.c_void_p, ctypes.c_void_p,
+    ]
+    _lib.mosyne_bposit_linear_w8a8.restype = ctypes.c_int
+    _lib.mosyne_bposit_linear_w8a8.argtypes = [
+        ctypes.c_void_p, ctypes.c_int, ctypes.c_int,
+        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int,
+        ctypes.c_void_p,
+    ]
+    _lib.mosyne_bposit_linear_w8a8_bf16.restype = ctypes.c_int
+    _lib.mosyne_bposit_linear_w8a8_bf16.argtypes = [
+        ctypes.c_void_p, ctypes.c_int, ctypes.c_int,
+        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int,
+        ctypes.c_void_p,
+    ]
+    _lib.mosyne_bposit_linear_w8a8_bf16_io.restype = ctypes.c_int
+    _lib.mosyne_bposit_linear_w8a8_bf16_io.argtypes = [
+        ctypes.c_void_p, ctypes.c_int, ctypes.c_int,
+        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int,
+        ctypes.c_void_p,
+    ]
     rc = _lib.mosyne_bposit_init()
     if rc != 0:
         raise RuntimeError(f"mosyne_bposit_init failed (rc={rc})")
@@ -83,6 +105,91 @@ def linear_w8a8(x: np.ndarray, w: np.ndarray) -> np.ndarray:
     if rc != 0:
         raise RuntimeError(f"mosyne_bposit_linear_w8a8_host failed (rc={rc})")
     return np.ascontiguousarray(y_cm)
+
+
+def quantize_weight_per_channel_dev(
+    w_fp32_dev_ptr: int, K: int, N: int,
+    w_i8_dev_ptr: int, w_scale_dev_ptr: int,
+) -> None:
+    """Quantize a column-major float32 weight ``[K, N]`` already resident on
+    the GPU to int8 with per-output-channel scales (also on the GPU). All
+    pointer arguments are integer device addresses — typically obtained from
+    a torch tensor's ``.data_ptr()``.
+
+    Layout matches the host-side library: ``w_fp32`` is column-major, the
+    scale buffer is ``[N]`` floats, and the output ``w_i8`` is column-major
+    ``[K, N]`` int8.
+    """
+    lib = _ensure_library()
+    rc = lib.mosyne_bposit_quantize_weight_per_channel(
+        ctypes.c_void_p(w_fp32_dev_ptr), K, N,
+        ctypes.c_void_p(w_i8_dev_ptr), ctypes.c_void_p(w_scale_dev_ptr),
+    )
+    if rc != 0:
+        raise RuntimeError(f"mosyne_bposit_quantize_weight_per_channel failed (rc={rc})")
+
+
+def linear_w8a8_dev(
+    x_fp32_dev_ptr: int, M: int, K: int,
+    w_i8_dev_ptr: int, w_scale_dev_ptr: int, N: int,
+    y_fp32_dev_ptr: int,
+) -> None:
+    """W8A8 linear with all buffers already on the GPU. Computes
+    ``y[M,N] = x[M,K] @ w[K,N]`` via the bposit-IMMA pipeline. Input is
+    quantized per-token internally; weights are expected pre-quantized
+    (call :func:`quantize_weight_per_channel_dev` first).
+
+    Buffer layout: ``x`` and ``y`` are column-major float32; ``w_i8`` is
+    column-major int8; ``w_scale`` is ``[N]`` float32. Pointers are
+    integer device addresses (e.g., ``tensor.data_ptr()``).
+    """
+    lib = _ensure_library()
+    rc = lib.mosyne_bposit_linear_w8a8(
+        ctypes.c_void_p(x_fp32_dev_ptr), M, K,
+        ctypes.c_void_p(w_i8_dev_ptr), ctypes.c_void_p(w_scale_dev_ptr), N,
+        ctypes.c_void_p(y_fp32_dev_ptr),
+    )
+    if rc != 0:
+        raise RuntimeError(f"mosyne_bposit_linear_w8a8 failed (rc={rc})")
+
+
+def linear_w8a8_dev_bf16(
+    x_bf16_dev_ptr: int, M: int, K: int,
+    w_i8_dev_ptr: int, w_scale_dev_ptr: int, N: int,
+    y_fp32_dev_ptr: int,
+) -> None:
+    """W8A8 linear with bf16 input — same contract as :func:`linear_w8a8_dev`
+    but ``x`` is column-major bfloat16 instead of float32, saving a cast for
+    callers whose activations are already bf16. Output stays float32.
+    """
+    lib = _ensure_library()
+    rc = lib.mosyne_bposit_linear_w8a8_bf16(
+        ctypes.c_void_p(x_bf16_dev_ptr), M, K,
+        ctypes.c_void_p(w_i8_dev_ptr), ctypes.c_void_p(w_scale_dev_ptr), N,
+        ctypes.c_void_p(y_fp32_dev_ptr),
+    )
+    if rc != 0:
+        raise RuntimeError(f"mosyne_bposit_linear_w8a8_bf16 failed (rc={rc})")
+
+
+def linear_w8a8_dev_bf16_io(
+    x_bf16_dev_ptr: int, M: int, K: int,
+    w_i8_dev_ptr: int, w_scale_dev_ptr: int, N: int,
+    y_bf16_dev_ptr: int,
+) -> None:
+    """W8A8 linear with bf16 input AND bf16 output — fully bf16-native hot
+    path. ``x`` and ``y`` are column-major bfloat16. Skips both the
+    bf16→fp32 input cast and the fp32→bf16 output cast for callers whose
+    activations are bf16 end-to-end (e.g. PyTorch transformers in bf16).
+    """
+    lib = _ensure_library()
+    rc = lib.mosyne_bposit_linear_w8a8_bf16_io(
+        ctypes.c_void_p(x_bf16_dev_ptr), M, K,
+        ctypes.c_void_p(w_i8_dev_ptr), ctypes.c_void_p(w_scale_dev_ptr), N,
+        ctypes.c_void_p(y_bf16_dev_ptr),
+    )
+    if rc != 0:
+        raise RuntimeError(f"mosyne_bposit_linear_w8a8_bf16_io failed (rc={rc})")
 
 
 def shutdown() -> None:

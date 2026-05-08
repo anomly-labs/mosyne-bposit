@@ -1,6 +1,3 @@
-% Copyright (c) 2026 Ry Bruscoe and Anomly, Inc.
-% SPDX-License-Identifier: Apache-2.0
-
 \documentclass[11pt,a4paper]{article}
 
 % --- Encoding & basic typography --------------------------------------------
@@ -58,7 +55,7 @@
 \newcommand{\NaR}{\texttt{NaR}}
 
 \title{Bounded Posits at IEEE Tensor-Core Throughput on Commodity NVIDIA Blackwell, with Bit-Exact Reproducibility}
-\author{Ry Bruscoe}
+\author{Ry Bruscoe\\Anomly Labs\\\href{mailto:ry@anomly.com}{ry@anomly.com}}
 \date{2026-05-06}
 
 \begin{document}
@@ -71,7 +68,7 @@
 \vspace*{3.5cm}
 
 {\large White Paper}\\[0.2cm]
-{\small Anomly, Inc. \quad\textbullet\quad May 2026}
+{\small Anomly Labs \quad\textbullet\quad May 2026}
 
 \vspace{2.0cm}
 
@@ -91,15 +88,17 @@ with Bit-Exact Reproducibility\par}
 \vspace{2.6cm}
 
 {\large Ry Bruscoe}\\[0.2cm]
-{\small Anomly, Inc.}\\[0.2cm]
-{\small \href{mailto:ry@anomly.com}{ry@anomly.com}}\\[0.5cm]
+{\small Anomly Labs}\\[0.2cm]
+{\small \href{mailto:ry@anomly.com}{ry@anomly.com}}\\[0.2cm]
+% ORCID slot: uncomment and fill before arXiv submission
+% {\small ORCID: \href{https://orcid.org/0000-0000-0000-0000}{0000-0000-0000-0000}}\\[0.2cm]
+\vspace{0.3cm}
 {\small 2026-05-06}
 
 \vfill
 
 {\small\itshape Reproducible source: \url{https://github.com/anomly-labs/mosyne-bposit/tree/main}}\\[0.3cm]
-{\footnotesize Hardware: RTX 5090 (Blackwell sm\_120) and RTX 3090 (Ampere sm\_86).}\\[0.4cm]
-{\footnotesize\copyright\ 2026 Ry Bruscoe and Anomly, Inc. \quad Licensed under the Apache License, Version 2.0.}
+{\footnotesize Hardware: RTX 5090 (Blackwell sm\_120) and RTX 3090 (Ampere sm\_86).}
 
 \end{titlepage}
 
@@ -133,6 +132,12 @@ shapes where the \texttt{cuBLASLt 12.8} INT8 algorithm dispatch
 underperforms its BF16 counterpart on consumer Blackwell. The
 $2\times$ weight-memory reduction and the bit-exact reproducibility
 property hold at every shape regardless of throughput.
+End-to-end autoregressive throughput on
+\textsc{Qwen2.5-Coder-1.5B-Instruct} closes to BF16 parity
+($133.2$ vs $132.8$ tok/s, $+0.3\,\%$ within run-to-run noise) once
+per-call wrapper overhead is amortised across the $84$ FFN linears
+of a token's forward pass; the matmul-level shape sensitivity above
+characterises a single op, not a deployed inference loop.
 This work is complementary to Stanford's MINOTAUR
 \cite{minotaur2025}, a custom posit-based ASIC demonstrating posit's
 energy advantage on dedicated silicon.
@@ -167,8 +172,8 @@ stacks paper over this with mitigations such as loss scaling, FP32
 master weights, SmoothQuant, and AWQ.
 
 A different number system --- \emph{posit} arithmetic, designed by
-John L.\ Gustafson \cite{gustafson_endoferror} --- offers two
-properties relevant here. First, \emph{tapered precision}: posits give
+John L.\ Gustafson \cite{gustafson_endoferror, gustafson_posits} ---
+offers two properties relevant here. First, \emph{tapered precision}: posits give
 more bits of mantissa to numbers near $1$ and fewer to extremes,
 matching the actual magnitude distribution of trained model weights.
 Second, posit's companion \emph{quire} accumulator is a wide
@@ -186,7 +191,7 @@ without waiting for posit-native hardware. We show that they can.
 \begin{itemize}
     \item A complete bounded-posit ALU running as CUDA
           \texttt{\_\_device\_\_} functions, validated bit-exact against
-          a Python rational-arithmetic reference across 33
+          a Python rational-arithmetic reference across 36
           single-command tests.
     \item A pipeline (\emph{Path C}) that decodes 8-bit \bposit{} into
           INT8 to feed the existing IMMA tensor cores, accumulates
@@ -237,8 +242,9 @@ neural-network weights cluster within a few orders of magnitude of $1$.
 where the regime $k$, exponent $e$, and fraction $f$ together occupy 15
 bits below the sign. With three exponent bits the per-regime base is
 $\mathrm{useed} = 2^{2^3} = 256$. The \emph{bounded} variant
-\cite{gustafson_endoferror} caps the regime field at $r_S = 6$ bits,
-fixing the dynamic range at $2^{-48}$ to $2^{48}$. \bpsixteen{}'s
+\cite{gustafson_endoferror}, aligned with the Posit Working Group
+draft standard \cite{posit_2017}, caps the regime field at
+$r_S = 6$ bits, fixing the dynamic range at $2^{-48}$ to $2^{48}$. \bpsixteen{}'s
 precision is comparable to FP16 and BF16: roughly $3.5$ decimal
 digits.
 
@@ -520,8 +526,8 @@ measures \textbf{$197.4 \pm 0.3$ \TPOPS{}}, $1.14\times$ BF16
 deviation across $8$ trials of $30$ reps each, run on a freshly-warm
 GPU with vLLM paused.
 The MERA tensor-network contraction at bond dimension $\chi=256$
-reaches $312.1$ \TFLOPS{} on the 5090 INT8 IMMA path (vs
-$30.2$ \TFLOPS{} on the RTX 3090 at the same shape, a $10\times$
+reaches $312.1$ \TPOPS{} on the 5090 INT8 IMMA path (vs
+$30.2$ \TPOPS{} on the RTX 3090 at the same shape, a $10\times$
 generation-on-generation jump).
 \Cref{fig:matmul-bars} visualises the shape sweep as a bar chart.
 
@@ -669,6 +675,120 @@ regime where INT8 IMMA underperforms BF16 HMMA on consumer Blackwell
 (\Cref{tab:matmul}); the $2\times$ weight-memory reduction holds, and
 the L2 error matches calibration-free W8A8 results in the AWQ family.}
 \label{tab:qwen}
+\end{table}
+
+\subsection{Downstream-task accuracy on real LLMs}
+\label{sec:downstream}
+
+Element-wise output error (\Cref{tab:qwen}) characterises a single
+forward pass; the question that matters for production deployment is
+whether the same quantisation preserves \emph{task} accuracy across
+many forward passes of a real model. We measure perplexity on
+WikiText-2-raw test, baseline (\texttt{bf16}) versus the same model
+with every FFN \texttt{nn.Linear} (\texttt{gate\_proj},
+\texttt{up\_proj}, \texttt{down\_proj}) replaced by
+\texttt{BPositLinear} (W8A8 via INT8 IMMA, the pipeline of
+\Cref{fig:pipeline}). Attention and \texttt{lm\_head} are left in
+\texttt{bf16}.
+
+\begin{table}[h]
+\centering
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{@{}lrrrr@{}}
+\toprule
+Model & Tokens evaluated & Baseline PPL & bposit-W8A8 PPL & $\Delta$ \\
+\midrule
+\textsc{Qwen2.5-Coder-0.5B-Instruct} & $16{,}384$  & $36.94$ & $36.94$ & $+0.00\,\%$ \\
+\textsc{Qwen2.5-Coder-0.5B-Instruct} & $130{,}944$ & $32.57$ & $32.64$ & $+0.21\,\%$ \\
+\textsc{Qwen2.5-Coder-1.5B-Instruct} & $65{,}472$  & $15.00$ & $15.08$ & $+0.56\,\%$ \\
+\bottomrule
+\end{tabular}}
+\caption{WikiText-2-raw test perplexity, baseline \texttt{bf16}
+vs.\ FFN-only bposit-W8A8 via INT8 IMMA. Across three configurations
+the perplexity gap is below $1\,\%$ --- squarely within the
+\emph{acceptable W8A8} band reported for SmoothQuant
+\cite{smoothquant} and AWQ \cite{awq} on the same model class. No
+calibration set was used (per-token activation $\times$ per-channel
+weight scaling, computed on the fly). Reproducible via
+\texttt{packages/mosyne\_bposit/examples/wikitext\_ppl\_bench.py}.}
+\label{tab:wikitext_ppl}
+\end{table}
+
+The combination of \Cref{tab:matmul} (throughput parity), this table
+(downstream perplexity preservation), and \Cref{tab:repro}
+(reproducibility) is the substantive claim that distinguishes this
+work from a numerics curiosity: bposit + quire + IMMA delivers all
+three properties at the same time on the silicon already in
+production, without a calibration set.
+
+\subsection{End-to-end autoregressive throughput}
+\label{sec:e2e}
+
+\Cref{tab:matmul} characterises individual matmul ops; \Cref{tab:qwen}
+characterises a single FFN block. The metric a deployed autoregressive
+inference loop is actually evaluated on is tokens-per-second over a full
+generation. We measure it on \textsc{Qwen2.5-Coder-1.5B-Instruct}
+generating $128$ new tokens deterministically (\texttt{do\_sample=False}),
+with all $84$ FFN \texttt{nn.Linear} modules ($28$ layers
+$\times$ \{\texttt{gate\_proj}, \texttt{up\_proj}, \texttt{down\_proj}\})
+swapped for \texttt{BPositLinear} (W8A8 via INT8 IMMA). Attention and
+\texttt{lm\_head} stay in \texttt{bf16}.
+
+\begin{table}[h]
+\centering
+\begin{tabular}{@{}lrr@{}}
+\toprule
+Path                              & throughput      & vs BF16 \\
+\midrule
+BF16 baseline                     & $132.8$ tok/s   & ---     \\
+\textbf{bposit-W8A8 (FFN only)}   & $\mathbf{133.2}$ \textbf{tok/s} & $\mathbf{+0.3\,\%}$ \\
+\bottomrule
+\end{tabular}
+\caption{End-to-end autoregressive token-generation throughput,
+\textsc{Qwen2.5-Coder-1.5B-Instruct} on the RTX 3090, deterministic
+decoding, $128$ new tokens $\times$ $3$ trials. The $+0.3\,\%$ delta
+sits inside run-to-run variance ($\pm 1\,\%$ across the $3$ trials per
+path). Reproducible via
+\texttt{packages/mosyne\_bposit/examples/qwen\_generate\_bench.py}.}
+\label{tab:e2e}
+\end{table}
+
+End-to-end parity comes from amortising per-call wrapper overhead across
+the many calls a single generated token issues. The \texttt{BPositLinear}
+hot path achieves this through three specific changes to the C library
+and its PyTorch wrapper. (i)~The library no longer issues a
+\texttt{cudaDeviceSynchronize} at the end of each call: with $84$ FFN
+linears per token, a per-call sync produced $84$ GPU drains per token
+and prevented cross-layer pipelining; PyTorch's own ops are
+async-by-default, and the host-roundtrip wrapper provides the necessary
+ordering through its trailing \texttt{cudaMemcpy(D2H)}. (ii)~The
+per-token activation quantise kernel is templated on input dtype and
+accepts \texttt{bf16} directly, eliminating a \texttt{bf16}$\rightarrow$\texttt{fp32}
+cast at the library boundary. (iii)~The dequantise kernel is templated
+on output dtype and emits \texttt{bf16} directly, eliminating the
+matching \texttt{fp32}$\rightarrow$\texttt{bf16} cast on the way back.
+The full hot path runs end-to-end in \texttt{bf16} with no \texttt{fp32}
+intermediates. The cumulative effect on autoregressive throughput is
+shown in \Cref{tab:e2e_progression}.
+
+\begin{table}[h]
+\centering
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+Build                                   & bposit       & BF16 baseline & gap \\
+\midrule
+Initial measurement                     & $100.0$ tok/s & $133.0$ tok/s & $-25.0\,\%$ \\
+After (i): drop per-call sync           & $129.7$ tok/s & $133.0$ tok/s & $-2.4\,\%$  \\
+After (ii): \texttt{bf16}-direct input  & $131.5$ tok/s & $132.8$ tok/s & $-1.0\,\%$  \\
+\textbf{After (iii): \texttt{bf16}-native dequant} & $\mathbf{133.2}$ \textbf{tok/s} & $\mathbf{132.8}$ \textbf{tok/s} & $\mathbf{+0.3\,\%}$ \\
+\bottomrule
+\end{tabular}
+\caption{Progression of the autoregressive throughput gap as the three
+hot-path overheads were closed in sequence. The matmul itself
+(cuBLASLt INT8 IMMA) is unchanged across all four rows; the
+improvement comes entirely from removing wrapper-level overhead that
+the per-FFN-block \Cref{tab:qwen} does not isolate.}
+\label{tab:e2e_progression}
 \end{table}
 
 \subsection{Quantisation-scheme progression}
@@ -851,21 +971,40 @@ silicon design problem in a useful way:
           \bpsixteen{} precision, fitting comfortably in on-die ROM).
 \end{itemize}
 
-\subsection{Vertical integration}
-\label{subsec:vertical}
+\subsection{Portability beyond NVIDIA tensor cores}
+\label{sec:portability}
 
-The pipeline presented here is one of three implementation fidelities
-of the bposit arithmetic stack at Anomly, Inc. The other two are
-hardware: an FPGA bitstream targeting the Xilinx Alveo U200 (PCIe
-accelerator, programmed and validated in fabric) and a custom posit
-ASIC submitted to the SkyWater 130\,nm shuttle through ChipFoundry,
-with first silicon (100 prototype dies) expected to return in Q2 2026.
-The 256-bit \quire{} layout used in this paper (1 sign + 63 carry +
-96 integer + 96 fraction bit fields) is reduced-to-practice in all
-three implementations from the same architectural specification.
-Energy-efficiency characterisation of the ASIC, and a bit-exact
-cross-implementation equivalence proof against the CUDA pipeline,
-are reserved for a follow-up paper after silicon arrives.
+The pipeline is presented on NVIDIA Blackwell because that is the
+silicon on which most production AI compute currently runs, but the
+algorithmic ingredients --- INT8 multiply-accumulate into a wider
+integer accumulator, bit-level encode/decode at the boundary, and a
+$256$-bit associative reduction --- are not NVIDIA-specific.
+Any matrix engine that exposes (i) an INT8 matmul with at-least-INT32
+accumulate and (ii) addressable on-chip scratch large enough to host a
+$256$-bit accumulator per reduction tile is a candidate target.
+
+The case worth naming explicitly is Tenstorrent's Tensix-based parts
+(Wormhole, Blackhole). Their matrix engines provide INT8 matmul with
+INT32 accumulation, the per-tile RISC-V ``baby cores'' can run the
+bit-level regime/exponent decode that does not vectorise cleanly on
+GPU warps, and the per-tile $\sim 1.5\,\mathrm{MB}$ L1 SRAM is large
+enough to host a \quireTSF{} per reduction tile or a sharded slice of
+the $\sim 9.6\,\mathrm{MB}$ \bpsixteen{} LUT. The dataflow,
+explicit-data-movement programming model is, if anything, a closer
+fit for the encode~$\to$~IMMA~$\to$~quire-accumulate~$\to$~decode
+pipeline than the GPGPU model the present implementation targets.
+A port through TT-Metalium is straightforward in principle and is
+open work.
+
+A second remark is that the reproducibility argument strengthens on
+open silicon: the bit-exact determinism property of bposit + quire
+removes one source of variability (parallel-reduction order), but the
+ISA, compiler, and microarchitecture remain trusted components. On
+fully open silicon (Tenstorrent's open ISA, an open RTL CGRA, or a
+posit-native ASIC such as MINOTAUR \cite{minotaur2025}) the trust
+boundary collapses further --- the same input produces the same
+output not only across runs of one chip, but across independent
+implementations of the same specification.
 
 \section{Related Work}
 \label{sec:related}
@@ -912,15 +1051,29 @@ one-unit-in-the-last-place round-trip error. A native
 decode-multiply-encode path would be more accurate but is not yet
 shipped.
 
-The \quireTSF{}-to-\bpsixteen{} encoder currently truncates at the
-$15$-bit boundary rather than rounding to nearest-even; this matches
-the truncation in the Python reference and simplifies bit-exact
-testing. A spec-correct round-to-nearest-even pass is future work.
+The default \quireTSF{}-to-\bpsixteen{} encoder on the device path
+truncates at the $15$-bit boundary; this matches the default
+truncation in the Python reference and simplifies bit-exact testing
+across CUDA and Python. A spec-correct round-to-nearest-ties-to-even
+sibling (\texttt{quire256\_to\_bposit16\_rtne}) ships alongside it
+and is bit-exact against the Python reference at
+\texttt{mode="rtne"} across the test suite. Both paths are available
+on device; the truncating variant remains the default for back-compat
+with the baked LUTs and existing kernels, and the RTNE variant is a
+drop-in replacement at the call site for workloads that prefer
+spec-aligned rounding to bit-exactness against historical results.
+A future tick is regenerating an RTNE-baked LUT family for the
+transcendental units; the encode path itself is closed.
 
-Throughput parity is shape-dependent. At small-batch decode of small
-models (e.g., \textsc{Qwen2.5-Coder-3B}'s $D = 2048$ FFN), BF16 HMMA
-is faster than INT8 IMMA on the RTX 3090 by approximately $22\,\%$;
-the win on memory and reproducibility persists.
+Matmul-level throughput parity is shape-dependent. At small-batch
+decode of small models (e.g., \textsc{Qwen2.5-Coder-3B}'s $D = 2048$
+FFN), bare \texttt{cuBLASLt} INT8 IMMA on the RTX 3090 is approximately
+$22\,\%$ slower than BF16 HMMA. The deployed
+\texttt{BPositLinear} forward is no longer constrained by this
+matmul-level deficit at autoregressive deployment scale
+(\Cref{sec:e2e}); a custom \texttt{CUTLASS} INT8 template tuned for
+small-$M$, large-$K$ would close the matmul-level deficit too, this
+is open work.
 
 We have not yet measured \texttt{QMMA} (FP4) directly. The
 \texttt{cuBLASLt 12.8} public API does not expose FP4 input on
@@ -943,14 +1096,17 @@ with a $256$-bit \quire{} that delivers bit-exact reproducibility IEEE
 float on tensor cores cannot. A real \textsc{Qwen2.5-Coder-3B} FFN
 layer runs through the pipeline at $0.78\times$ BF16 HMMA throughput,
 half the weight memory, and $3.56\,\%$ L2 error in calibration-free
-W8A8 post-training quantisation.
+W8A8 post-training quantisation. End-to-end autoregressive throughput
+on \textsc{Qwen2.5-Coder-1.5B-Instruct} reaches BF16 parity
+($+0.3\,\%$, within run-to-run noise) once per-call wrapper overhead
+is amortised across the FFN linears of a token's forward pass.
 
 Future directions include: a CUTLASS-based measurement of QMMA FP4
 throughput for a like-for-like baseline; GPTQ-style layer-by-layer
 calibration on a real LLM checkpoint to push W8A8 L2 error below
-$1\,\%$; a full multi-layer \textsc{Qwen} or \textsc{Llama} forward
-pass on the pipeline; a PyTorch custom op exposing the IMMA path for
-external use; and a silicon implementation embodying the same
+$1\,\%$; custom \texttt{CUTLASS} INT8 templates tuned for the small-$M$
+decode regime to close the matmul-level deficit at the skinny-K shapes
+of \Cref{tab:matmul}; and a silicon implementation embodying the same
 software ALU as a bit-exact reference.
 
 \section*{Reproducibility}
@@ -1036,17 +1192,6 @@ K.~Feng, K.~Prabhu et al.
 for extended reality perception workloads.
 \newblock \emph{IEEE Custom Integrated Circuits Conference (CICC)},
 April 2025.
-
-\bibitem{rovelli_smolin_1995}
-C.~Rovelli and L.~Smolin.
-\newblock Discreteness of area and volume in quantum gravity.
-\newblock \emph{Nuclear Physics B}, 442(3):593--619, 1995.
-
-\bibitem{ambjorn_loll_1998}
-J.~Ambjørn and R.~Loll.
-\newblock Non-perturbative Lorentzian quantum gravity, causality and
-topology change.
-\newblock \emph{Nuclear Physics B}, 536(1--2):407--434, 1998.
 
 \bibitem{smoothquant}
 G.~Xiao, J.~Lin, M.~Seznec, H.~Wu, J.~Demouth, S.~Han.

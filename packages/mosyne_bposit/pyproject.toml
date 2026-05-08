@@ -1,6 +1,3 @@
-# Copyright (c) 2026 Ry Bruscoe and Anomly, Inc.
-# SPDX-License-Identifier: Apache-2.0
-
 [build-system]
 requires = ["setuptools>=64", "wheel"]
 build-backend = "setuptools.build_meta"
@@ -37,6 +34,7 @@ torch = ["torch>=2.0"]
 
 [project.scripts]
 "mosyne-bposit-build" = "mosyne_bposit.build_so:main"
+"mosyne-bposit-demo"  = "mosyne_bposit.demo:main"
 
 [project.urls]
 Homepage = "https://github.com/anomly-labs/mosyne-bposit"

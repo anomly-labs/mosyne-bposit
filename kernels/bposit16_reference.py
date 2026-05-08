@@ -1,6 +1,3 @@
-# Copyright (c) 2026 Ry Bruscoe and Anomly, Inc.
-# SPDX-License-Identifier: Apache-2.0
-
 """bposit16 reference implementation, integer-only, per Gustafson Ch.7.
 
 Parameters from spec/header (5DST_v2_API_SPEC.h, bposit_types.h):
@@ -448,6 +445,8 @@ def _encode_unsigned(value: Fraction, mode: str = "truncate") -> int:
             sticky = f > 0
             lsb_odd = bits[14] == 1
             round_up = round_bit == 1 and (sticky or lsb_odd)
+        else:
+            round_up = False
 
     # Pack 15 bits into integer
     out = 0
@@ -457,9 +456,10 @@ def _encode_unsigned(value: Fraction, mode: str = "truncate") -> int:
     out <<= (15 - len(bits))
     out &= 0x7FFF
 
-    if mode == "rtne" and round_up and out < 0x7FFF:
+    if mode == "rtne" and round_up:
         # Increment the field; saturate at maxPos (0x7FFF) instead of wrapping.
-        out += 1
+        if out < 0x7FFF:
+            out += 1
 
     return out
 
@@ -755,18 +755,39 @@ def bposit16_add(a: int, b: int) -> int:
 
 
 def quire256_to_bposit32(q: int) -> int:
-    """Final round to bposit32. Same encoder as bposit16 but with more
-    fraction bits — for the POC we round through bposit16 and upconvert."""
+    """Final round to bposit32. Calls encode_bposit32 directly on the
+    quire's Fraction representation, so the result has bposit32 precision
+    (~7 decimal digits, 23 fraction bits + regime/exponent) rather than
+    bposit16 precision (~3.5 decimal digits) widened by trivial shift.
+
+    For values exactly representable in bposit16 (e.g. small integer
+    powers of two like H = log₂(n) for the canonical shannon test case
+    on uniform p = 1/n) the native and bridged encodings agree
+    bit-exactly; for arbitrary distributions where the entropy lands on
+    a non-power-of-two value the native encoder preserves the extra
+    fraction bits."""
     if q == 0:
         return 0
     sign = q < 0
     q_abs = -q if sign else q
-    # q_abs / 2^QUIRE_FRAC_BITS is the represented value
+    val = Fraction(q_abs, 1 << QUIRE_FRAC_BITS)
+    if sign:
+        val = -val
+    return encode_bposit32(val)
+
+
+def quire256_to_bposit32_via_bp16(q: int) -> int:
+    """Original POC bridge: encode through bposit16 then 16-bit upshift
+    (Gustafson 7.4). Kept for differential testing against the native
+    quire256_to_bposit32 above. New code should prefer the native form."""
+    if q == 0:
+        return 0
+    sign = q < 0
+    q_abs = -q if sign else q
     val = Fraction(q_abs, 1 << QUIRE_FRAC_BITS)
     if sign:
         val = -val
     p16 = encode_bposit16(val)
-    # Trivial upconversion bposit16 → bposit32 = shift left 16 (Gustafson 7.4)
     return (p16 << 16) & 0xFFFFFFFF
 
 
@@ -833,3 +854,33 @@ if __name__ == "__main__":
     out16 = (out >> 16) & 0xFFFF
     val = float(decoded_to_fraction(decode_bposit16(out16)))
     print(f"  8 * 0.5 = 4.0  →  quire256_to_bposit32 = {val:.4f}")
+
+    # 5. Native vs bridged bposit32 encoder — differential.
+    # For values exactly representable in bposit16 (powers of two), they
+    # should agree bit-exactly. For values with non-zero "low" bits beyond
+    # bposit16's precision, the native encoder should preserve the extra
+    # fraction bits while the bridge truncates at the bp16 boundary.
+    print("\nNative vs bridged bposit32 encoder (differential):")
+    test_quires = [
+        ("2.0 (exact in bp16)",     Fraction(2)),
+        ("4.0 (exact in bp16)",     Fraction(4)),
+        ("0.25 (exact in bp16)",    Fraction(1, 4)),
+        ("1.5 (exact in bp16)",     Fraction(3, 2)),
+        ("π ≈ 3.14159...",          Fraction(355, 113)),
+        ("e ≈ 2.71828...",          Fraction(193, 71)),
+        ("1.234567891 (irrational)", Fraction(1234567891, 10**9)),
+    ]
+    n_match, n_diverge = 0, 0
+    for label, val in test_quires:
+        q = int(val * (1 << QUIRE_FRAC_BITS))
+        native = quire256_to_bposit32(q)
+        bridge = quire256_to_bposit32_via_bp16(q)
+        same = native == bridge
+        n_match += same; n_diverge += not same
+        f_native = float(decoded_to_fraction_32(decode_bposit32(native))) if native else 0.0
+        f_bridge = float(decoded_to_fraction_32(decode_bposit32(bridge))) if bridge else 0.0
+        match = "agree" if same else "DIVERGE"
+        print(f"  {label:30s} native=0x{native:08x} bridge=0x{bridge:08x}  {match}")
+        if not same:
+            print(f"      native →{f_native:.10f}  bridge →{f_bridge:.10f}  target →{float(val):.10f}")
+    print(f"  summary: {n_match} agree (exact-in-bp16), {n_diverge} diverge (native preserves bp32 precision)")

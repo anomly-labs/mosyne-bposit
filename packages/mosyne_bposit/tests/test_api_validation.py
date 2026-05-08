@@ -1,6 +1,3 @@
-# Copyright (c) 2026 Ry Bruscoe and Anomly, Inc.
-# SPDX-License-Identifier: Apache-2.0
-
 """Validation/structural tests that don't require a built libmosyne_bposit.so.
 
 These exercise the public API surface: import, version exposure, library_path
