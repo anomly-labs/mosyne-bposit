@@ -137,6 +137,13 @@ A complete demo (load Qwen2.5-Coder-3B, swap in W8A8 for layers 10–12,
 compare logits to the BF16 baseline) lives at
 ``examples/transformers_qwen_integration.py``.
 
+Supported activation dtypes: ``torch.bfloat16``, ``torch.float16``, and
+``torch.float32``. ``BPositLinear.forward`` dispatches on input dtype:
+``bfloat16`` and ``float16`` route through fully-native hot paths that
+keep both quantize and dequantize kernels in the input dtype (no fp32
+intermediate buffers in the inner loop). ``float32`` and any other
+dtype go through the cast-to-fp32 path.
+
 For the perplexity-on-real-LLM accuracy benchmark cited above, see
 ``examples/wikitext_ppl_bench.py`` — runs Qwen2.5-Coder against
 WikiText-2-raw test, baseline vs FFN-only bposit-W8A8, and prints the

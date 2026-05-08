@@ -46,7 +46,7 @@ def time_op(fn, n_warmup, n_iter):
     return times[len(times) // 2] * 1000.0
 
 
-def bench_shape(name, M, K, N, dtype, device, n_warmup, n_iter):
+def bench_shape(name, M, K, N, dtype, device, n_warmup, n_iter, dtype_label):
     x = torch.randn(M, K, dtype=dtype, device=device)
     w = torch.randn(N, K, dtype=dtype, device=device)
 
@@ -54,20 +54,20 @@ def bench_shape(name, M, K, N, dtype, device, n_warmup, n_iter):
     bf.weight.data.copy_(w)
     bp = BPositLinear(weight=w)
 
-    bf_us = time_op(lambda: bf(x), n_warmup, n_iter)
+    base_us = time_op(lambda: bf(x), n_warmup, n_iter)
     bp_us = time_op(lambda: bp(x), n_warmup, n_iter)
 
     print(
-        f"  {name:14s} | bf16 nn.Linear={bf_us:7.1f} µs | "
-        f"bposit={bp_us:7.1f} µs | gap={bp_us - bf_us:+7.1f} µs | "
-        f"bp/bf16={bp_us / bf_us:5.2f}×"
+        f"  {name:14s} | {dtype_label} nn.Linear={base_us:7.1f} µs | "
+        f"bposit={bp_us:7.1f} µs | gap={bp_us - base_us:+7.1f} µs | "
+        f"bp/{dtype_label}={bp_us / base_us:5.2f}×"
     )
-    return bf_us, bp_us
+    return base_us, bp_us
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("--dtype", choices=["bf16", "fp32"], default="bf16",
+    ap.add_argument("--dtype", choices=["bf16", "fp16", "fp32"], default="bf16",
                     help="activation/weight dtype for both paths (default: bf16)")
     ap.add_argument("--n-warmup", type=int, default=20)
     ap.add_argument("--n-iter", type=int, default=200,
@@ -76,7 +76,11 @@ def main():
     args = ap.parse_args()
 
     torch.manual_seed(0)
-    dtype = torch.bfloat16 if args.dtype == "bf16" else torch.float32
+    dtype = {
+        "bf16": torch.bfloat16,
+        "fp16": torch.float16,
+        "fp32": torch.float32,
+    }[args.dtype]
     device = torch.device(args.device)
 
     print(f"GPU:    {torch.cuda.get_device_name(device.index or 0)} "
@@ -85,7 +89,7 @@ def main():
     print()
 
     for name, M, K, N in SHAPES:
-        bench_shape(name, M, K, N, dtype, device, args.n_warmup, args.n_iter)
+        bench_shape(name, M, K, N, dtype, device, args.n_warmup, args.n_iter, args.dtype)
 
 
 if __name__ == "__main__":
