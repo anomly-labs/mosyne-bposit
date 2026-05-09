@@ -748,7 +748,16 @@ BF16 baseline                     & $132.8$ tok/s   & ---     \\
 \textsc{Qwen2.5-Coder-1.5B-Instruct} on the RTX 3090, deterministic
 decoding, $128$ new tokens $\times$ $3$ trials. The $+0.3\,\%$ delta
 sits inside run-to-run variance ($\pm 1\,\%$ across the $3$ trials per
-path). Reproducible via
+path). \textbf{Scope:} this result is FFN-only ($84$ linears: $28$
+layers $\times$ \{gate, up, down\}-proj). Extending the swap to
+attention $Q$/$K$/$V$/$O$ projections regresses end-to-end throughput
+by $-13$ to $-16\,\%$ because the K/V shapes ($1536\to 256$ for
+\textsc{Qwen}'s grouped-query attention) land in the same skinny-N
+regime where \texttt{cuBLASLt}'s INT8 IMMA heuristic underperforms BF16
+HMMA on consumer Blackwell (\Cref{tab:matmul}); attention quantisation
+is therefore not part of this paper's deployment recommendation and
+remains gated on the \texttt{CUTLASS} small-$M$ template work in
+\Cref{sec:limits}. Reproducible via
 \texttt{packages/mosyne\_bposit/examples/qwen\_generate\_bench.py}.}
 \label{tab:e2e}
 \end{table}
