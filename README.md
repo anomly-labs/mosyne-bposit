@@ -41,6 +41,39 @@ Reproducibility* (`docs/whitepaper/`). It contains:
 See `docs/whitepaper/mosyne_bposit_whitepaper.tex` for the full set of
 measurements, methodology, error analysis, and discussion.
 
+## 60-second reproducibility demo
+
+If you're here to verify the bit-exact-reproducibility claim — the
+property that drives the eval / interpretability / regulatory-audit
+use case — the fastest path is:
+
+```bash
+cd scripts/repro_bench/min_demo
+make demo
+```
+
+This builds `kernels/test_determinism_headline.cu` for `sm_86 + sm_120`,
+runs it on every NVIDIA GPU on your host, and prints a comparison table.
+On a host with both an RTX 3090 (Ampere) and RTX 5090 (Blackwell), the
+output reads:
+
+```
+GPU  Name                       bposit (5 runs)     FP32 atomicAdd (5 runs, unique)
+---  ----                       ---------------     -------------------------------
+0    NVIDIA GeForce RTX 5090    bposit16=0x7627     bits=0x4a93ec2e … 0x4a93ec70  (5 unique)
+1    NVIDIA GeForce RTX 3090    bposit16=0x7627     bits=0x4a93ec40 … 0x4a93ec4a  (5 unique)
+
+✓ bposit produced the SAME hash on all 2 GPU(s) —
+  bit-exact reproducibility across hardware generations.
+  IEEE FP32 atomicAdd produced 9 distinct hashes across
+  10 runs total (5 per GPU × 2 GPUs).
+```
+
+No PyTorch, no model download, no Python beyond what `nvcc` itself
+needs — just the synthetic 65 K-element log-uniform sum from
+whitepaper §4.2 turned into a turnkey artifact. Full design notes:
+`scripts/repro_bench/min_demo/README.md`.
+
 ## Quick start
 
 ```bash
