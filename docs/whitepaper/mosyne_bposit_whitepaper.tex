@@ -186,6 +186,26 @@ The open question we address is whether posits can be delivered \emph{at
 the throughput modern AI compute requires} on commodity silicon, today,
 without waiting for posit-native hardware. We show that they can.
 
+\subsection*{Scope and context}
+
+This paper describes one component --- the numerics layer --- of a
+larger framework called \textsc{Mosyne}, a synthetic-data and
+eval-reproducibility platform targeted at AI model builders (training
+data leads, eval/safety leads, interpretability researchers,
+red-team). Mosyne's other components include an \textsc{AutoData}-style
+synthetic-Q\&A pipeline with information-asymmetric weak/strong
+solvers and a domain-independent acceptance gate (the
+\texttt{mosyne\_forge} module), per-call attribution envelopes
+(identity / capability / telemetry / HMAC) for tamper-evident corpus
+provenance (the \texttt{forensic\_proxy} module), and a Model Context
+Protocol surface so existing agentic tools (Claude Desktop, OpenHuman,
+Cursor) drive the pipeline directly. This paper restricts itself to
+the numerics layer because it is the prerequisite for the
+reproducibility property the other components rely on; the broader
+framework is described elsewhere. The numerics layer is independently
+useful and is open-sourced at
+\url{https://github.com/anomly-labs/mosyne-bposit}.
+
 \subsection{Contribution}
 
 \begin{itemize}
@@ -749,16 +769,26 @@ BF16 baseline                     & $132.8$ tok/s   & ---     \\
 decoding, $128$ new tokens $\times$ $3$ trials. The $+0.3\,\%$ delta
 sits inside run-to-run variance ($\pm 1\,\%$ across the $3$ trials per
 path). \textbf{Scope:} this result is FFN-only ($84$ linears: $28$
-layers $\times$ \{gate, up, down\}-proj). Extending the swap to
-attention $Q$/$K$/$V$/$O$ projections regresses end-to-end throughput
-by $-13$ to $-16\,\%$ because the K/V shapes ($1536\to 256$ for
-\textsc{Qwen}'s grouped-query attention) land in the same skinny-N
-regime where \texttt{cuBLASLt}'s INT8 IMMA heuristic underperforms BF16
-HMMA on consumer Blackwell (\Cref{tab:matmul}); attention quantisation
-is therefore not part of this paper's deployment recommendation and
-remains gated on the \texttt{CUTLASS} small-$M$ template work in
-\Cref{sec:limits}. Reproducible via
-\texttt{packages/mosyne\_bposit/examples/qwen\_generate\_bench.py}.}
+layers $\times$ \{gate, up, down\}-proj). \emph{Extended} attention
+coverage: a per-shape diagnostic
+(\texttt{docs/research/bposit\_attn\_regression\_breakdown\_2026-05-09.md})
+isolates the regression to a single shape --- the GQA K/V projection
+($1536\to 256$ on this model, $4096\to 1024$ on Qwen3-Coder-30B) ---
+where \texttt{cuBLASLt}'s INT8 IMMA heuristic loses $\sim$3$\times$ to
+BF16 HMMA. Skipping only the K/V projection
+(\texttt{skip\_kv\_proj=True}) and swapping the remaining attention
+projections ($Q$, $O$) brings the attention-only regression to
+$-7.1\,\%$ with output bit-identical to BF16, and the combined
+FFN$+$attention path to $-8.1\,\%$ (140 linears swapped). Naively
+swapping all four attention projections without the K/V skip
+regresses to $-45.5\,\%$: the difference between $-8\,\%$ and $-45\,\%$
+is entirely the GQA K/V shape, not a property of attention as a
+surface. The recommended deployment pattern is therefore FFN-only for
+bit-identical determinism (\Cref{tab:e2e}) or FFN$+$ATTN with
+\texttt{skip\_kv\_proj=True} for full block coverage at the
+$-8\,\%$ throughput cost. Reproducible via
+\texttt{packages/mosyne\_bposit/examples/qwen\_generate\_bench.py}
+(\texttt{--swap-attention --skip-kv-proj}).}
 \label{tab:e2e}
 \end{table}
 
@@ -798,6 +828,41 @@ hot-path overheads were closed in sequence. The matmul itself
 improvement comes entirely from removing wrapper-level overhead that
 the per-FFN-block \Cref{tab:qwen} does not isolate.}
 \label{tab:e2e_progression}
+\end{table}
+
+\begin{table}[h]
+\centering
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{@{}lrrcr@{}}
+\toprule
+Coverage policy                      & throughput (BF16) & throughput (FP16) & bit-identical output & perplexity $\Delta$ \\
+\midrule
+FFN only                             & $+0.3\,\%$ & $-0.4\,\%$ & \textbf{BF16 \& FP16}  & $+0.02\,\%$ \\
+ATTN only $+$ \texttt{skip\_kv\_proj} & $-7.1\,\%$ & $-7.2\,\%$ & \textbf{BF16 only}     & $-0.03\,\%$ \\
+FFN $+$ ATTN $+$ \texttt{skip\_kv\_proj} & $-8.2\,\%$ & $-9.1\,\%$ & no                    & $+0.22\,\%$ \\
+FFN $+$ ATTN, no \texttt{skip\_kv\_proj} & $-45.5\,\%$ & ---  & no                    & --- \\
+\bottomrule
+\end{tabular}}
+\caption{The deployment Pareto surface across throughput (cost),
+output determinism (bit-identical to native BF16), and quality
+(WikiText-2-raw test PPL on \textsc{Qwen2.5-Coder-0.5B-Instruct},
+$32 \times 512$ tokens, baseline $36.94$). All three working policies
+preserve perplexity well within the \Cref{sec:downstream} ``$<1\,\%$''
+deployable scope. Determinism is the discriminator: FFN-only is the
+only policy that produces bit-identical output across both BF16 and
+FP16 inference dtypes; ATTN-only $+$ \texttt{skip\_kv\_proj} preserves
+bit-identicality on BF16 but not FP16, because FP16's finer mantissa
+surfaces \texttt{bposit} quantisation noise across the per-token
+top-1/top-2 argmax gap that BF16's coarser rounding absorbs.
+Operators chasing the verifiable-computation property pick FFN-only
+$+$ BF16; operators prioritising memory savings extend to ATTN $+$
+\texttt{skip\_kv\_proj} on either dtype at the documented throughput
+cost. Reproducible via
+\texttt{qwen\_generate\_bench.py --swap-ffn --swap-attention --skip-kv-proj}
+and \texttt{wikitext\_ppl\_bench.py} with the same flags. Per-shape
+diagnostic in
+\texttt{docs/research/bposit\_attn\_regression\_breakdown\_2026-05-09.md}.}
+\label{tab:e2e_pareto}
 \end{table}
 
 \subsection{Quantisation-scheme progression}
@@ -1115,7 +1180,12 @@ throughput for a like-for-like baseline; GPTQ-style layer-by-layer
 calibration on a real LLM checkpoint to push W8A8 L2 error below
 $1\,\%$; custom \texttt{CUTLASS} INT8 templates tuned for the small-$M$
 decode regime to close the matmul-level deficit at the skinny-K shapes
-of \Cref{tab:matmul}; and a silicon implementation embodying the same
+of \Cref{tab:matmul} and the GQA K/V shape ($1536 \to 256$, $4096 \to
+1024$) currently routed around by the
+\texttt{skip\_kv\_proj=True} policy in
+\Cref{sec:e2e}; a fused QKV projection that eliminates the narrow-N
+shape entirely by concatenating $W_Q$, $W_K$, $W_V$ into a single
+wider matmul; and a silicon implementation embodying the same
 software ALU as a bit-exact reference.
 
 \section*{Reproducibility}

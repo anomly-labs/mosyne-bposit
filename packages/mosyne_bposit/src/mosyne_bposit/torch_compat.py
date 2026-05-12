@@ -229,14 +229,58 @@ class BPositLinear(nn.Module):
         )
 
 
+_KV_PROJ_LEAVES = ("k_proj", "v_proj")
+
+
+def _is_kv_proj(full_name: str) -> bool:
+    """True iff the *leaf* of ``full_name`` is ``k_proj`` or ``v_proj``.
+    Uses the last path segment so substring traps like
+    ``k_proj_norm`` don't match while root-level ``k_proj`` (no parent
+    prefix) still does."""
+    return full_name.rsplit(".", 1)[-1] in _KV_PROJ_LEAVES
+
+
 def replace_linear_modules(
     model: nn.Module,
     predicate: Optional[Callable[[str, nn.Linear], bool]] = None,
+    narrow_n_threshold: Optional[int] = None,
+    skip_kv_proj: bool = False,
 ) -> nn.Module:
     """Walk *model* and replace every ``nn.Linear`` with a ``BPositLinear``.
 
     If *predicate* is given, it's called as ``predicate(qualified_name,
     linear)`` and only modules where it returns truthy are replaced.
+
+    If *narrow_n_threshold* is set, ``nn.Linear`` modules whose
+    ``out_features`` is **below** the threshold are left as-is. Default
+    ``None`` keeps the historical behaviour (replace everything that
+    matches ``predicate``). The right value is **model-specific**: it
+    should be ``kv_dim + 1`` so that only the GQA K/V projection is
+    skipped — bposit wins at every other transformer shape, including
+    Q/O and FFN-down at decode time (verified iter-57). Common models:
+
+    ====================================  ========  ========  ==========
+    model                                 hidden    kv_dim    threshold
+    ====================================  ========  ========  ==========
+    Qwen2.5-Coder-1.5B-Instruct           1536      256       257
+    Qwen2.5-Coder-7B-Instruct             3584      512       513
+    Qwen2.5-Coder-32B-Instruct            5120      1024      1025
+    Qwen3-Coder-30B-A3B-AWQ               4096      1024      1025
+    Llama-3.1-8B / 70B                    4096/8192 1024      1025
+    ====================================  ========  ========  ==========
+
+    Setting threshold too high (e.g., 2048 on 1.5B) also skips Q/O/down
+    and gives up the bposit decode win — leading to *worse* throughput
+    than no threshold. See
+    ``docs/research/bposit_attn_regression_breakdown_2026-05-09.md``.
+
+    If *skip_kv_proj* is ``True``, modules whose qualified name ends
+    in ``.k_proj`` or ``.v_proj`` are left as-is. This is the
+    name-based equivalent of ``narrow_n_threshold = kv_dim + 1`` and
+    is the recommended way to express "skip the GQA K/V projection,
+    which loses on bposit-IMMA, regardless of the model's specific
+    kv_dim". Composes with ``predicate`` and ``narrow_n_threshold``
+    (any of the three rejecting a module skips it).
 
     Returns the (now-modified) model.
 
@@ -249,6 +293,9 @@ def replace_linear_modules(
             return ".mlp." in name and any(f".layers.{i}." in name for i in range(10, 16))
 
         replace_linear_modules(model, predicate=keep)
+
+        # Replace everything except narrow-output projections:
+        replace_linear_modules(model, narrow_n_threshold=2048)
     """
     # First collect (parent, attr_name, child) pairs; we can't mutate while iterating.
     # Use the canonical _modules dict — it's where PyTorch tracks named submodules
@@ -258,12 +305,144 @@ def replace_linear_modules(
         for attr, child in module._modules.items():
             if isinstance(child, nn.Linear) and not isinstance(child, BPositLinear):
                 full = f"{qual_name}.{attr}" if qual_name else attr
-                if predicate is None or predicate(full, child):
-                    targets.append((module, attr, child, full))
+                if predicate is not None and not predicate(full, child):
+                    continue
+                if (narrow_n_threshold is not None
+                        and child.out_features < narrow_n_threshold):
+                    continue
+                if skip_kv_proj and _is_kv_proj(full):
+                    continue
+                targets.append((module, attr, child, full))
     for parent, attr, _linear, _full in targets:
         new_mod = BPositLinear.from_linear(_linear)
         setattr(parent, attr, new_mod)
     return model
 
 
-__all__ = ["BPositLinear", "replace_linear_modules"]
+class FusedQKVProjection(nn.Module):
+    """Fused (Q, K, V) projection — three ``nn.Linear`` modules become
+    one wider ``BPositLinear`` matmul with runtime output slicing.
+
+    Closes the residual bposit attention regression by eliminating
+    the narrow-N (GQA K/V) shape that iter-56 identified as the only
+    place bposit-IMMA loses to bf16. Concatenating Q + K + V weight
+    rows along the output axis turns three narrow matmuls into one
+    wide matmul (e.g., 4096→4096 + 4096→1024 + 4096→1024 becomes a
+    single 4096→6144) — same per-head arithmetic, well above the
+    narrow-N threshold cuBLASLt's tile heuristic mis-handles.
+
+    Drop-in replacement for the canonical transformer attention
+    triple::
+
+        # Before:
+        self.q_proj = nn.Linear(hidden, n_heads * head_dim)
+        self.k_proj = nn.Linear(hidden, n_kv_heads * head_dim)
+        self.v_proj = nn.Linear(hidden, n_kv_heads * head_dim)
+        q, k, v = self.q_proj(x), self.k_proj(x), self.v_proj(x)
+
+        # After (iter-105+, once the forward kernel lands):
+        self.qkv = FusedQKVProjection.from_separate(
+            q_proj=self.q_proj, k_proj=self.k_proj, v_proj=self.v_proj,
+        )
+        q, k, v = self.qkv(x)
+
+    **Status (iter-104):** API surface only. Construction succeeds
+    and the concatenated weight is materialised, so callers can
+    introspect the resulting shape and verify the iter-105+
+    benchmark target. ``forward()`` raises ``NotImplementedError``
+    until the kernel work wires the fused-shape bposit matmul
+    through ``BPositLinear``'s dispatch path. Decision recorded in
+    ``docs/research/fused_qkv_decision_2026-05-11.md``.
+    """
+
+    def __init__(
+        self,
+        q_out: int,
+        k_out: int,
+        v_out: int,
+        in_features: int,
+    ) -> None:
+        super().__init__()
+        if q_out <= 0 or k_out <= 0 or v_out <= 0:
+            raise ValueError("q_out / k_out / v_out must be positive")
+        if in_features <= 0:
+            raise ValueError("in_features must be positive")
+        self.q_out = q_out
+        self.k_out = k_out
+        self.v_out = v_out
+        self.in_features = in_features
+        self.out_features = q_out + k_out + v_out
+        # Weight is initialised by from_separate(); raw __init__ is
+        # for testing the shape arithmetic without real weights.
+        self._fused: Optional[BPositLinear] = None
+
+    @classmethod
+    def from_separate(
+        cls,
+        q_proj: nn.Linear,
+        k_proj: nn.Linear,
+        v_proj: nn.Linear,
+    ) -> "FusedQKVProjection":
+        """Build a FusedQKVProjection by concatenating three existing
+        nn.Linear weights along the output axis. The input dimension
+        must match across all three; bias is supported only if all
+        three projections agree on having or not having bias (the
+        common case in modern transformers is no bias)."""
+        in_f = q_proj.in_features
+        if k_proj.in_features != in_f or v_proj.in_features != in_f:
+            raise ValueError(
+                f"q/k/v in_features mismatch: "
+                f"q={q_proj.in_features}, k={k_proj.in_features}, "
+                f"v={v_proj.in_features}",
+            )
+        has_bias = q_proj.bias is not None
+        if (k_proj.bias is not None) != has_bias \
+                or (v_proj.bias is not None) != has_bias:
+            raise ValueError(
+                "all three of q/k/v_proj must agree on bias presence "
+                "(common case is no bias; FusedQKVProjection won't "
+                "interleave bias-yes and bias-no projections)",
+            )
+        fused = cls(
+            q_out=q_proj.out_features,
+            k_out=k_proj.out_features,
+            v_out=v_proj.out_features,
+            in_features=in_f,
+        )
+        # Concatenate the [out, in] weight matrices along the output
+        # axis. Result: [q_out + k_out + v_out, in_features].
+        cat_w = torch.cat(
+            [q_proj.weight, k_proj.weight, v_proj.weight], dim=0,
+        )
+        cat_b = None
+        if has_bias:
+            cat_b = torch.cat(
+                [q_proj.bias, k_proj.bias, v_proj.bias], dim=0,
+            )
+        fused._fused = BPositLinear(weight=cat_w, bias=cat_b)
+        return fused
+
+    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Run the fused projection and slice the output into (Q, K, V).
+
+        Not yet implemented: the runtime slicing path is iter-105+
+        scope. Construction works; this raise keeps users from
+        accidentally relying on a forward that hasn't been verified
+        against the iter-58 acceptance tests yet.
+        """
+        raise NotImplementedError(
+            "FusedQKVProjection.forward is iter-105+ scope. "
+            "See docs/research/fused_qkv_decision_2026-05-11.md "
+            "for the implementation plan.",
+        )
+
+    def extra_repr(self) -> str:
+        return (
+            f"q_out={self.q_out}, k_out={self.k_out}, v_out={self.v_out}, "
+            f"in_features={self.in_features}, "
+            f"out_features={self.out_features}, "
+            f"materialised={self._fused is not None}"
+        )
+
+
+__all__ = ["BPositLinear", "FusedQKVProjection", "replace_linear_modules"]

@@ -1,8 +1,11 @@
-"""Wikitext-2 perplexity comparison: baseline vs bposit-W8A8 (FFN linears).
+"""Wikitext-2 perplexity comparison: baseline vs bposit-W8A8.
 
 Compares Qwen2.5-Coder-0.5B-Instruct on a fixed slice of WikiText-2-raw test,
-first in bf16 baseline, then with the FFN gate/up/down nn.Linear modules
-replaced by mosyne_bposit.torch_compat.BPositLinear (W8A8 via INT8 IMMA).
+first in bf16/fp16 baseline, then with selected nn.Linear modules replaced
+by mosyne_bposit.torch_compat.BPositLinear (W8A8 via INT8 IMMA). Default
+swaps FFN only (the whitepaper §4.5 deployment-recommended scope); pass
+``--swap-attention --skip-kv-proj`` to also extend to the attention Q/O
+projections under the iter-58 narrow-N skip policy.
 
 This is the downstream-task accuracy claim the whitepaper currently lacks.
 """
@@ -44,13 +47,38 @@ def evaluate_perplexity(model, tokenizer, texts, max_seqs, ctx_len, device):
     return math.exp(avg_nll), tok_sum, time.perf_counter() - t0
 
 
-def replace_ffn_linears(model):
-    """Convert just the FFN gate_proj/up_proj/down_proj nn.Linear modules to
-    BPositLinear. Leave attention (q/k/v/o) and lm_head in fp32 for now —
-    those have known issues with naïve W8A8 (KV cache, low-rank projections).
-    Reports the count + total params replaced."""
+FFN_PROJ_NAMES = (".gate_proj", ".up_proj", ".down_proj")
+ATTN_PROJ_NAMES = (".q_proj", ".k_proj", ".v_proj", ".o_proj")
+
+
+def replace_linears(
+    model,
+    *,
+    swap_ffn: bool = True,
+    swap_attention: bool = False,
+    skip_kv_proj: bool = False,
+):
+    """Replace selected nn.Linear modules with BPositLinear. Surface
+    matches qwen_generate_bench.replace_linears so users get a coherent
+    story across throughput and perplexity benches.
+
+    Default swaps FFN only (whitepaper §4.5 scope: bit-identical bf16
+    parity). With ``swap_attention=True`` also extends to attention
+    projections; ``skip_kv_proj=True`` is the iter-58 narrow-N policy
+    that leaves the GQA K/V projections on bf16 — bposit loses ~3× on
+    those at prefill, see
+    docs/research/bposit_attn_regression_breakdown_2026-05-09.md.
+    """
     from mosyne_bposit.torch_compat import BPositLinear
     import torch.nn as nn
+
+    needles: list[str] = []
+    if swap_ffn:
+        needles.extend(FFN_PROJ_NAMES)
+    if swap_attention:
+        needles.extend(ATTN_PROJ_NAMES)
+    if not needles:
+        return model
 
     targets = []
     for name, module in model.named_modules():
@@ -59,17 +87,28 @@ def replace_ffn_linears(model):
             if (
                 isinstance(child, nn.Linear)
                 and not isinstance(child, BPositLinear)
-                and any(k in full for k in (".gate_proj", ".up_proj", ".down_proj"))
+                and any(k in full for k in needles)
             ):
+                if skip_kv_proj and full.rsplit(".", 1)[-1] in ("k_proj", "v_proj"):
+                    continue
                 targets.append((module, attr, child, full))
+
     n_params = 0
-    for parent, attr, child, full in targets:
+    for parent, attr, child, _full in targets:
         n_params += child.weight.numel()
-        new_mod = BPositLinear.from_linear(child)
-        setattr(parent, attr, new_mod)
-    print(f"  replaced {len(targets)} FFN linears "
-          f"({n_params/1e6:.1f}M params, ~{n_params/1e6 * 1:.0f} MB at int8)")
+        setattr(parent, attr, BPositLinear.from_linear(child))
+
+    surface = "+".join(
+        s for s, on in [("FFN", swap_ffn), ("attention", swap_attention)] if on
+    )
+    print(f"  replaced {len(targets)} {surface} linears "
+          f"({n_params/1e6:.1f}M params, ~{n_params/1e6:.0f} MB at int8)")
     return model
+
+
+# Back-compat alias for any external callers of the iter-9 name.
+def replace_ffn_linears(model):
+    return replace_linears(model, swap_ffn=True, swap_attention=False)
 
 
 def main():
@@ -78,7 +117,20 @@ def main():
     ap.add_argument("--n-seqs", type=int, default=64)
     ap.add_argument("--ctx-len", type=int, default=512)
     ap.add_argument("--device", default="cuda:0")
+    ap.add_argument("--model-dtype", choices=["bf16", "fp16"], default="bf16",
+                    help="dtype to load the HF model in (default: bf16)")
+    ap.add_argument("--swap-ffn", dest="swap_ffn", action="store_true", default=True,
+                    help="swap FFN gate/up/down linears to bposit (default on)")
+    ap.add_argument("--no-swap-ffn", dest="swap_ffn", action="store_false")
+    ap.add_argument("--swap-attention", dest="swap_attention",
+                    action="store_true", default=False,
+                    help="also swap attention q/k/v/o projections")
+    ap.add_argument("--skip-kv-proj", action="store_true", default=False,
+                    help="skip .k_proj and .v_proj by name (iter-58 narrow-N "
+                         "policy — recommended when --swap-attention is on)")
     args = ap.parse_args()
+    if not (args.swap_ffn or args.swap_attention):
+        ap.error("must enable at least one of --swap-ffn / --swap-attention")
 
     print(f"loading dataset wikitext-2-raw-v1 test split...")
     ds = load_dataset("wikitext", "wikitext-2-raw-v1", split="test")
@@ -88,9 +140,10 @@ def main():
     print(f"loading tokenizer for {args.model}")
     tokenizer = AutoTokenizer.from_pretrained(args.model)
 
-    print("\n=== baseline: bf16 ===")
+    model_dtype = torch.bfloat16 if args.model_dtype == "bf16" else torch.float16
+    print(f"\n=== baseline: {args.model_dtype} ===")
     model = AutoModelForCausalLM.from_pretrained(
-        args.model, torch_dtype=torch.bfloat16, device_map=args.device,
+        args.model, torch_dtype=model_dtype, device_map=args.device,
         low_cpu_mem_usage=True,
     )
     print(f"  loaded {sum(p.numel() for p in model.parameters())/1e6:.1f}M params")
@@ -99,12 +152,20 @@ def main():
     )
     print(f"  baseline PPL = {base_ppl:.4f}  ({base_tok} tokens, {base_dt:.1f}s)")
 
-    print("\n=== bposit W8A8 (FFN only) ===")
+    surface = "+".join(
+        s for s, on in [("FFN", args.swap_ffn), ("attention", args.swap_attention)] if on
+    )
+    if args.skip_kv_proj:
+        surface += " (skip_kv_proj)"
+    print(f"\n=== bposit W8A8 ({surface}) ===")
     # BPositLinear handles the fp32 cast on each individual weight inside
     # its constructor — no need to cast the whole model to fp32 (which would
-    # double its memory). Surrounding modules stay in bf16; BPositLinear
-    # casts inputs to fp32 inside forward and outputs back to x.dtype.
-    replace_ffn_linears(model)
+    # double its memory). Surrounding modules stay in the model dtype;
+    # BPositLinear dispatches on input dtype to native bf16/fp16 paths.
+    replace_linears(model,
+                    swap_ffn=args.swap_ffn,
+                    swap_attention=args.swap_attention,
+                    skip_kv_proj=args.skip_kv_proj)
     bp_ppl, bp_tok, bp_dt = evaluate_perplexity(
         model, tokenizer, texts, args.n_seqs, args.ctx_len, args.device,
     )
@@ -112,6 +173,8 @@ def main():
 
     print("\n=== summary ===")
     print(f"  model       : {args.model}")
+    print(f"  dtype       : {args.model_dtype}")
+    print(f"  swapped     : {surface}")
     print(f"  context     : {args.n_seqs} × {args.ctx_len} tokens")
     print(f"  baseline    : PPL={base_ppl:.4f}")
     print(f"  bposit-W8A8 : PPL={bp_ppl:.4f}  (Δ={bp_ppl-base_ppl:+.4f}, "

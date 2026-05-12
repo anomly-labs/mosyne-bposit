@@ -3,6 +3,15 @@
 Date: 2026-05-08
 Status: scoping only; no code yet.
 
+> **Forward pointer (iter-57, 2026-05-10):** the −13 to −16 % framing
+> below was wrong on both ends. Naive whole-attention swap is actually
+> −45 %; the right K/V-only-skip pattern (`skip_kv_proj=True`, shipped
+> iter-58) reaches −7.1 % attention-only with bit-identical output.
+> The per-shape diagnostic that pinned this down lives at
+> `bposit_attn_regression_breakdown_2026-05-09.md`. Whitepaper §4.5 has
+> been updated to reflect the corrected story. This doc is preserved
+> as the iter-30 measurement record.
+
 ## Context
 
 The end-to-end Qwen2.5-Coder-1.5B parity result (whitepaper §4.5,

@@ -4,6 +4,22 @@ Bounded-posit (`bposit`) W8A8 matrix multiplication on NVIDIA tensor cores
 via INT8 IMMA, with bit-exact reproducibility across runs that IEEE float
 on tensor cores cannot deliver.
 
+> **For AI model builders** (eval / interpretability / fleet-deployment
+> leads): this is the numerics layer of [Mosyne](https://gitlab.com/anomly/mosyne),
+> a framework for synthetic-data generation + eval reproducibility on
+> commodity hardware. If your eval pipeline needs *"did this model say X
+> on date D given input Y"* answerable as a SHA-256 hash check across
+> heterogeneous GPU fleets — that's what `BPositLinear` gives you as a
+> drop-in `nn.Linear` replacement. If your pre-train data pipeline needs
+> difficulty-graded synthetic Q&A with auditable per-datum provenance —
+> that's what `mosyne_forge` (private repo) gives you on top. This
+> package is the deployable piece you can pip-install today.
+>
+> Five-minute walkthrough of the wider framework (math / code / chat /
+> RAG adapters, HF dataset integration, 24/7 autopilot, SFT export):
+> [`docs/MODEL_BUILDER_QUICKSTART.md`](https://gitlab.com/anomly/mosyne/-/blob/main/docs/MODEL_BUILDER_QUICKSTART.md)
+> in the parent repo.
+
 ## 30-second demo
 
 ```bash
@@ -136,6 +152,26 @@ replace_linear_modules(
 A complete demo (load Qwen2.5-Coder-3B, swap in W8A8 for layers 10–12,
 compare logits to the BF16 baseline) lives at
 ``examples/transformers_qwen_integration.py``.
+
+### Extending past FFN to attention projections
+
+The whitepaper §4.5 deployment recommendation is FFN-only because the
+GQA K/V projection (e.g. 1536→256 on Qwen2.5-Coder-1.5B) hits a
+narrow-N regime where cuBLASLt INT8 IMMA loses ~3× to bf16. The
+`skip_kv_proj=True` policy lets you swap the rest of attention (Q, O)
+without that penalty:
+
+```python
+replace_linear_modules(model, skip_kv_proj=True)        # whole model
+# Or via the bench CLI for end-to-end timing:
+# python qwen_generate_bench.py --swap-ffn --swap-attention --skip-kv-proj
+```
+
+Verified on Qwen2.5-Coder-1.5B (3090): attention-only with this flag
+is -7.1% throughput with bit-identical output to bf16; FFN+attention
+combined is -8.1% (the bposit decode-step wins on FFN-down and Q/O
+roughly cancel the attention penalty). Per-shape diagnostic at
+`docs/research/bposit_attn_regression_breakdown_2026-05-09.md`.
 
 Supported activation dtypes: ``torch.bfloat16``, ``torch.float16``, and
 ``torch.float32``. ``BPositLinear.forward`` dispatches on input dtype:

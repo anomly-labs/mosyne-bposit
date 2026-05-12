@@ -21,12 +21,31 @@ FFN_PROJ_NAMES = (".gate_proj", ".up_proj", ".down_proj")
 ATTN_PROJ_NAMES = (".q_proj", ".k_proj", ".v_proj", ".o_proj")
 
 
-def replace_linears(model, swap_ffn: bool = True, swap_attention: bool = False):
+def replace_linears(
+    model,
+    swap_ffn: bool = True,
+    swap_attention: bool = False,
+    narrow_n_threshold: int | None = None,
+    skip_kv_proj: bool = False,
+):
     """Replace nn.Linear modules with BPositLinear, gated by which sublayers
     to target. ``swap_ffn`` covers gate / up / down projections;
     ``swap_attention`` covers q / k / v / o projections. Pass both to swap
     every linear in the transformer block (everything except embeddings,
-    layer norms, and the lm_head)."""
+    layer norms, and the lm_head).
+
+    ``narrow_n_threshold`` skips any matched linear whose ``out_features``
+    is below the threshold. Set to ``kv_dim + 1`` for the target model
+    (257 on Qwen2.5-Coder-1.5B, 1025 on Qwen3-Coder-30B) to leave only
+    the GQA K/V projection on bf16; bposit wins on every other shape at
+    decode time. See docs/research/bposit_attn_regression_breakdown_2026-05-09.md
+    — too high (e.g. 2048 on 1.5B) also skips Q/O/down and produces
+    *worse* throughput than no threshold at all.
+
+    ``skip_kv_proj=True`` is the name-based equivalent of "set
+    ``narrow_n_threshold`` to ``kv_dim + 1``" — model-agnostic, no
+    config lookup needed. Recommended over ``narrow_n_threshold`` when
+    you only need to skip the GQA K/V projection."""
     from mosyne_bposit.torch_compat import BPositLinear
     import torch.nn as nn
     needles = []
@@ -45,6 +64,11 @@ def replace_linears(model, swap_ffn: bool = True, swap_attention: bool = False):
                 and not isinstance(child, BPositLinear)
                 and any(k in full for k in needles)
             ):
+                if (narrow_n_threshold is not None
+                        and child.out_features < narrow_n_threshold):
+                    continue
+                if skip_kv_proj and full.rsplit(".", 1)[-1] in ("k_proj", "v_proj"):
+                    continue
                 targets.append((module, attr, child, full))
     for parent, attr, child, full in targets:
         setattr(parent, attr, BPositLinear.from_linear(child))
@@ -110,6 +134,14 @@ def main():
     ap.add_argument("--swap-attention", dest="swap_attention", action="store_true",
                     default=False,
                     help="also swap attention q/k/v/o projections to BPositLinear")
+    ap.add_argument("--narrow-n-threshold", type=int, default=None,
+                    help="skip swapping linears whose out_features is below "
+                         "this threshold (set to kv_dim+1 for the model). "
+                         "default: no skip — see "
+                         "docs/research/bposit_attn_regression_breakdown_2026-05-09.md")
+    ap.add_argument("--skip-kv-proj", action="store_true", default=False,
+                    help="skip .k_proj and .v_proj by name (model-agnostic "
+                         "way to express --narrow-n-threshold=kv_dim+1)")
     args = ap.parse_args()
     if not (args.swap_ffn or args.swap_attention):
         ap.error("must enable at least one of --swap-ffn / --swap-attention")
@@ -143,7 +175,9 @@ def main():
     )
     print(f"\n=== swapping {swap_label} linears to BPositLinear ===")
     n_replaced = replace_linears(
-        model, swap_ffn=args.swap_ffn, swap_attention=args.swap_attention
+        model, swap_ffn=args.swap_ffn, swap_attention=args.swap_attention,
+        narrow_n_threshold=args.narrow_n_threshold,
+        skip_kv_proj=args.skip_kv_proj,
     )
     print(f"  replaced {n_replaced} {swap_label} linears")
 
