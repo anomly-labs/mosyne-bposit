@@ -95,7 +95,28 @@ static int ensure_buffer(void** ptr, size_t* current, size_t required) {
 extern "C" int mosyne_bposit_init() {
     if (g_lt) return 0;
     if (cublasLtCreate(&g_lt) != CUBLAS_STATUS_SUCCESS) return -1;
-    g_ws_bytes = (size_t)64 << 20;  // 64 MB default workspace
+    // iter-301: workspace size is now env-configurable via
+    // MOSYNE_BPOSIT_WS_MB (default 64 MB). cuBLASLt's INT8 IMMA
+    // algorithm picker respects the workspace cap; larger
+    // workspace = more algorithm options = potentially higher
+    // throughput on big shapes (Llama-70B FFN-down at
+    // K=28672 N=8192 etc.). Mining the forge corpus surfaced
+    // that test_ffn_pt benchmarks at ~470 MB; bposit defaults
+    // conservatively because most production inference uses
+    // 7B-30B FFN shapes that fit in 64 MB. Override at startup:
+    //   MOSYNE_BPOSIT_WS_MB=256 python my_inference.py
+    size_t ws_mb = 64;
+    if (const char* env = std::getenv("MOSYNE_BPOSIT_WS_MB")) {
+        char* endp = nullptr;
+        unsigned long parsed = std::strtoul(env, &endp, 10);
+        // Sanity: clamp to [16, 4096] MB. Below 16 MB starves
+        // cuBLASLt; above 4 GB is almost certainly a typo and
+        // a real user could OOM their inference job.
+        if (endp != env && parsed >= 16 && parsed <= 4096) {
+            ws_mb = (size_t)parsed;
+        }
+    }
+    g_ws_bytes = ws_mb << 20;
     if (cudaMalloc(&g_ws, g_ws_bytes) != cudaSuccess) {
         cublasLtDestroy(g_lt); g_lt = nullptr; return -2;
     }

@@ -30,11 +30,20 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# General PyTorch dep — sufficient for Ampere (3090, A100) / Ada
+# (4090) / Hopper (H100). For Blackwell (sm_120, RTX 5090 / RTX
+# PRO 6000) you need PyTorch >= 2.7 with CUDA >= 12.8; install
+# from the cu128 channel:
+#   pip install --upgrade --index-url \
+#     https://download.pytorch.org/whl/cu128 torch
+# mosyne-bposit-demo and mosyne-bposit-probe detect this case at
+# startup and print an actionable install hint.
 torch = ["torch>=2.0"]
 
 [project.scripts]
 "mosyne-bposit-build" = "mosyne_bposit.build_so:main"
 "mosyne-bposit-demo"  = "mosyne_bposit.demo:main"
+"mosyne-bposit-probe" = "mosyne_bposit.cross_gpu_probe:main"
 
 [project.urls]
 Homepage = "https://github.com/anomly-labs/mosyne-bposit"

@@ -2,7 +2,8 @@
 
 Skips cleanly when:
   - PyTorch is not installed
-  - CUDA is not available to PyTorch
+  - CUDA is not usable by PyTorch — no GPU, or a visible GPU whose
+    compute capability the installed torch wheel wasn't built for
   - libmosyne_bposit.so is not built / present
 
 so that hosts without nvcc + GPU continue to pass the suite.
@@ -13,9 +14,34 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-if not torch.cuda.is_available():
-    pytest.skip("CUDA not available; device-path tests require a GPU",
-                allow_module_level=True)
+
+def _cuda_usable() -> bool:
+    """True only if PyTorch can actually run a kernel on the GPU.
+
+    `torch.cuda.is_available()` returns True whenever a CUDA device
+    is *visible* — but a device whose compute capability isn't in
+    the installed PyTorch build (e.g. an sm_120 RTX 5090 on a torch
+    wheel built for sm_90 and below) is visible yet unusable: the
+    first real op raises RuntimeError. Probe with an actual op so
+    the module skips cleanly on such hosts instead of erroring out
+    five tests deep — matching this file's documented contract.
+    """
+    if not torch.cuda.is_available():
+        return False
+    try:
+        _ = (torch.zeros(8, device="cuda") + 1.0).sum().cpu()
+    except RuntimeError:
+        return False
+    return True
+
+
+if not _cuda_usable():
+    pytest.skip(
+        "CUDA device not usable by this PyTorch build (no GPU, or "
+        "GPU compute capability unsupported by the installed torch "
+        "wheel); device-path tests require a working GPU",
+        allow_module_level=True,
+    )
 
 
 def _library_available() -> bool:

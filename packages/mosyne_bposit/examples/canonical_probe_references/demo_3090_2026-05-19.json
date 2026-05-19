@@ -1,0 +1,67 @@
+{
+  "ok": true,
+  "passed": 4,
+  "total": 4,
+  "gpu": "NVIDIA GeForce RTX 3090",
+  "pytorch": "2.5.1+cu124",
+  "claims": [
+    {
+      "name": "throughput",
+      "passed": true,
+      "details": {
+        "shape": {
+          "M": 128,
+          "K": 4096,
+          "N": 11008
+        },
+        "fp32_us": 616.72,
+        "bf16_us": 237.35,
+        "bposit_us": 358.24,
+        "ratio_vs_fp32": 0.581,
+        "ratio_vs_bf16": 1.509
+      }
+    },
+    {
+      "name": "accuracy",
+      "passed": true,
+      "details": {
+        "shape": {
+          "M": 256,
+          "K": 4096,
+          "N": 4096
+        },
+        "fp32_ref_l2": 0.49953,
+        "rel_err_pct": 1.2218,
+        "threshold_pct": 5.0
+      }
+    },
+    {
+      "name": "reproducibility",
+      "passed": true,
+      "details": {
+        "shape": {
+          "M": 64,
+          "K": 2048,
+          "N": 2048
+        },
+        "n_runs": 5,
+        "distinct_hashes": 1,
+        "first_hash": "1cbf3da9492e1af8"
+      }
+    },
+    {
+      "name": "memory",
+      "passed": true,
+      "details": {
+        "shape": {
+          "K": 4096,
+          "N": 11008
+        },
+        "bf16_mb": 86.0,
+        "bposit_mb": 43.042,
+        "ratio": 0.5005,
+        "threshold": 0.55
+      }
+    }
+  ]
+}

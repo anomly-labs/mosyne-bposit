@@ -4,8 +4,26 @@ Run once after ``pip install mosyne-bposit``:
 
     $ mosyne-bposit-build
 
-Requires ``nvcc`` on PATH (CUDA 12.x).  Compiles for sm_86 (Ampere) and
-sm_120 (Blackwell) so the same .so works on RTX 3090 / 4090 / 5090.
+Requires ``nvcc`` on PATH (CUDA 12.x). Default arch set covers
+the production NVIDIA GPU fleet:
+
+  sm_80  — NVIDIA A100 (datacentre Ampere)
+  sm_86  — RTX 3090 / 3080 / A10 (consumer Ampere)
+  sm_89  — RTX 4090 / Ada PRO (Ada Lovelace)
+  sm_90  — NVIDIA H100 / H200 (Hopper)
+  sm_120 — RTX 5090 / RTX PRO 6000 (Blackwell)
+
+Without explicit sm_X codegen, an unrecognised GPU runs via
+PTX JIT on first invocation — adds startup latency and may not
+produce arch-optimal SASS. Each extra arch adds ~30 KB; the
+full set lands well under 1 MB for the .so itself.
+
+iter-300 (2026-05-19) added sm_80, sm_89, sm_90 to the default
+set after the forge corpus surfaced the gap — without those
+arches, A100 / 4090 / H100 fall back to PTX JIT, losing the
+arch-specific optimisations bposit's quire / decode / encode
+kernels benefit from. Override with --archs if you need a
+different set.
 """
 from __future__ import annotations
 
@@ -34,7 +52,8 @@ def build(*, archs: list[str] | None = None, verbose: bool = True) -> Path:
             "`nvcc --version` works before running mosyne-bposit-build."
         )
 
-    archs = archs or ["86", "120"]
+    # iter-300: full production-fleet arch set. See module docstring.
+    archs = archs or ["80", "86", "89", "90", "120"]
     cmd = [
         nvcc,
         "-O3",
@@ -63,8 +82,10 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument(
         "--archs",
-        default="86,120",
-        help="Comma-separated SM archs to build for (default: 86,120 for Ampere+Blackwell).",
+        default="80,86,89,90,120",
+        help="Comma-separated SM archs to build for (default: "
+             "80,86,89,90,120 — covers A100/3090/4090/H100/5090 "
+             "without PTX-JIT fallback).",
     )
     ap.add_argument("-q", "--quiet", action="store_true")
     args = ap.parse_args()
