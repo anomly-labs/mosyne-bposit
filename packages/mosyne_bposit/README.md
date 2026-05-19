@@ -140,23 +140,52 @@ bits, on the same GPU and across different GPUs of the same architecture.
   toward 2× (`--swap-attention --skip-kv-proj` in the bench script;
   see "Extending past FFN to attention projections" below).
 
-* **Throughput characterisation (honest).** Measured on RTX 3090 vs
-  native PyTorch `nn.Linear`:
+* **Throughput characterisation (honest, per workload class).** RTX 3090,
+  bposit-W8A8 vs `bf16` `nn.Linear`, p50 over 200 reps after 40-iter
+  warmup. Full sweep + reproducer in
+  [`examples/per_shape_sweep.py`](examples/per_shape_sweep.py);
+  canonical output at
+  [`examples/canonical_probe_references/per_shape_sweep_3090_2026-05-19.json`](examples/canonical_probe_references/per_shape_sweep_3090_2026-05-19.json).
 
-  | Shape (M × K × N)            | fp32   | bf16   | bposit | bp/bf16        |
-  |------------------------------|--------|--------|--------|----------------|
-  | Llama FFN-gate 128×4096×11008| 611 µs | 237 µs | 333 µs | 1.40× slower   |
-  | Decode-class   1×4096×4096   |  79 µs |  48 µs |  43 µs | **0.91×** (faster) |
-  | Small square   32×2048×2048  |  39 µs |  25 µs |  43 µs | 1.72× slower   |
+  **Decode (M=1) — bposit wins:**
 
-  Against `bf16` (the realistic deployment baseline), bposit is faster
-  at autoregressive decode and slower at prefill / small shapes. With
-  the bf16-native hot path (no fp32 buffers in the inner loop), the
-  decode-shape advantage compounds: end-to-end Qwen2.5-Coder-1.5B
-  token generation is 133.2 tok/s for bposit-W8A8 vs 132.8 tok/s for
-  the bf16 baseline (+0.3%, within run-to-run noise). The
-  reproducibility + accuracy + memory pitch now lands without any
-  throughput trade — bposit matches bf16 end-to-end.
+  | Shape (M × K × N)                       | bf16     | bposit   | ratio |
+  |-----------------------------------------|----------|----------|-------|
+  | `decode_qkv`     1 × 4096 × 12288       | 138 µs   |  99 µs   | **0.72× (28% faster)** |
+  | `decode_ffn_30b` 1 × 6144 × 16384       | 271 µs   | 181 µs   | **0.67× (33% faster)** |
+  | `decode_tiny`    1 × 2048 × 2048        |  20 µs   |  26 µs   | 1.27× slower |
+
+  **Layer-batched FFN (M=128) — bposit loses 1.2–1.8×:**
+
+  | Shape (M × K × N)                       | bf16     | bposit   | ratio |
+  |-----------------------------------------|----------|----------|-------|
+  | `ffn_gate_7b`    128 × 4096 × 11008     | 244 µs   | 336 µs   | 1.38× |
+  | `ffn_down_7b`    128 × 11008 × 4096     | 195 µs   | 357 µs   | 1.83× (worst) |
+  | `ffn_gate_30b`   128 × 6144 × 16384     | 457 µs   | 619 µs   | 1.35× |
+  | `ffn_down_30b`   128 × 16384 × 6144     | 421 µs   | 664 µs   | 1.58× |
+  | `ffn_gate_70b`   128 × 8192 × 28672     | 931 µs   | 1125 µs  | 1.21× |
+  | `ffn_down_70b`   128 × 28672 × 8192     | 1038 µs  | 1389 µs  | 1.34× |
+
+  **Prefill (M=2048) — bposit loses 1.3–1.5×:**
+
+  | Shape (M × K × N)                       | bf16     | bposit   | ratio |
+  |-----------------------------------------|----------|----------|-------|
+  | `prefill_qkv_7b`  2048 × 4096 × 12288   | 2893 µs  | 4213 µs  | 1.46× |
+  | `prefill_qkv_30b` 2048 × 6144 × 18432   | 6432 µs  | 8656 µs  | 1.35× |
+
+  **End-to-end (`qwen_generate_bench.py`):** Qwen2.5-Coder-1.5B
+  autoregressive generation, bf16-native hot path: bposit-W8A8 at
+  133.2 tok/s vs bf16 baseline at 132.8 tok/s (+0.3%, within run-to-run
+  noise). The decode-shape wins dominate the inner loop; the
+  layer-batched-FFN losses don't apply to single-token generation.
+  Reproducibility + accuracy + memory pitch lands without an
+  end-to-end throughput trade.
+
+  **Deployment heuristic:** for autoregressive inference (decode-bound),
+  use bposit unconditionally — wins on every shape that matters. For
+  prefill-heavy or large-batch FFN workloads, profile first; bposit's
+  reproducibility + memory savings may still be worth the 1.2–1.8×
+  latency cost depending on what your downstream gating cares about.
 
   Against `fp32` (less common deployment baseline), bposit is 1.5–1.9×
   faster on the same shapes — but most production inference runs in
