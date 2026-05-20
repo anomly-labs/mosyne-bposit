@@ -1,0 +1,12 @@
+{
+  "gpu_name": "NVIDIA GeForce RTX 5090",
+  "compute_capability": "sm_120",
+  "cuda_version": "12.8",
+  "pytorch_version": "2.11.0+cu128",
+  "seed": 1234,
+  "hashes": {
+    "small": "7c1aa17a15c172480a6d7fc3ca95b492c57e1c11294c81980a3b8207a6664479",
+    "llama_ffn": "f09044874dd6fc8a1574f6ed26a5a1c9e12733ec26e53bd5e722836b40618b69",
+    "square": "41f3e589bb777d374c215652d15157ecd0fba43c29d1b3b680dcf3a52689d058"
+  }
+}

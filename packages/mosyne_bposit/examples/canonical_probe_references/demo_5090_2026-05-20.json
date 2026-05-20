@@ -1,0 +1,67 @@
+{
+  "ok": true,
+  "passed": 4,
+  "total": 4,
+  "gpu": "NVIDIA GeForce RTX 5090",
+  "pytorch": "2.11.0+cu128",
+  "claims": [
+    {
+      "name": "throughput",
+      "passed": true,
+      "details": {
+        "shape": {
+          "M": 128,
+          "K": 4096,
+          "N": 11008
+        },
+        "fp32_us": 222.89,
+        "bf16_us": 127.88,
+        "bposit_us": 149.31,
+        "ratio_vs_fp32": 0.67,
+        "ratio_vs_bf16": 1.168
+      }
+    },
+    {
+      "name": "accuracy",
+      "passed": true,
+      "details": {
+        "shape": {
+          "M": 256,
+          "K": 4096,
+          "N": 4096
+        },
+        "fp32_ref_l2": 0.499774,
+        "rel_err_pct": 1.2293,
+        "threshold_pct": 5.0
+      }
+    },
+    {
+      "name": "reproducibility",
+      "passed": true,
+      "details": {
+        "shape": {
+          "M": 64,
+          "K": 2048,
+          "N": 2048
+        },
+        "n_runs": 5,
+        "distinct_hashes": 1,
+        "first_hash": "7cb5142befd3227b"
+      }
+    },
+    {
+      "name": "memory",
+      "passed": true,
+      "details": {
+        "shape": {
+          "K": 4096,
+          "N": 11008
+        },
+        "bf16_mb": 86.0,
+        "bposit_mb": 43.042,
+        "ratio": 0.5005,
+        "threshold": 0.55
+      }
+    }
+  ]
+}
