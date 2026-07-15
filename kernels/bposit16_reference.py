@@ -75,6 +75,12 @@ def decoded_to_fraction_32(d: "Decoded") -> Fraction:
         return Fraction(0)
     if d.is_special == "nar":
         raise ValueError("NaR")
+    # Same two-step decode as decoded_to_fraction (bposit16):
+    # decode_bposit32 took the 2's complement of the trailing 31
+    # bits when sign=1, so (k, e, f_bits) describe the *magnitude*
+    # — we just negate. The (-1)^sign · useed^k · 2^e · (1+f)
+    # shorthand is wrong for negative posits and is deliberately
+    # not used here.
     base = Fraction(USEED) ** d.k  # USEED = 256 same as bposit16
     base *= Fraction(1 << d.e) if d.e >= 0 else Fraction(1, 1 << -d.e)
     if d.f_width > 0:
@@ -188,6 +194,12 @@ def decoded_to_fraction_8(d: "Decoded") -> Fraction:
         return Fraction(0)
     if d.is_special == "nar":
         raise ValueError("NaR")
+    # Same two-step decode as decoded_to_fraction (bposit16):
+    # decode_bposit8 took the 2's complement of the trailing 7
+    # bits when sign=1, so (k, e, f_bits) describe the magnitude
+    # — we just negate. The (-1)^sign · useed_8^k · 2^e · (1+f)
+    # shorthand is wrong for negative posits and is deliberately
+    # not used here.
     base = Fraction(USEED_8) ** d.k
     base *= Fraction(1 << d.e) if d.e >= 0 else Fraction(1, 1 << -d.e)
     if d.f_width > 0:
@@ -346,7 +358,13 @@ def decoded_to_fraction(d: Decoded) -> Fraction:
         return Fraction(0)
     if d.is_special == "nar":
         raise ValueError("NaR")
-    # value = (-1)^sign * useed^k * 2^e * (1 + f_bits / 2^f_width)
+    # For sign=0:  value = useed^k * 2^e * (1 + f_bits / 2^f_width).
+    # For sign=1:  decode_bposit16 already took the 2's complement of
+    # the trailing 15 bits, so (k, e, f_bits) describe the *magnitude*
+    # — we just negate. The single-formula shorthand
+    # value = (-1)^sign * useed^k * 2^e * (1 + f) that appears in some
+    # posit literature gives the wrong magnitude for negative values
+    # and is deliberately avoided here (per Gustafson, 2026-05-15).
     base = Fraction(USEED) ** d.k
     base *= Fraction(1 << d.e) if d.e >= 0 else Fraction(1, 1 << -d.e)
     if d.f_width > 0:
