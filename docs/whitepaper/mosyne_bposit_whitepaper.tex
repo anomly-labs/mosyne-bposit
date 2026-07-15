@@ -130,8 +130,11 @@ matmuls (training prefill, large-square, and attention-score shapes),
 is at parity at medium prefill, and loses on certain decode-with-skinny-K
 shapes where the \texttt{cuBLASLt 12.8} INT8 algorithm dispatch
 underperforms its BF16 counterpart on consumer Blackwell. The
-$2\times$ weight-memory reduction and the bit-exact reproducibility
-property hold at every shape regardless of throughput.
+per-matrix $2\times$ weight-memory reduction (8-bit posit weights vs
+16-bit BF16) and the bit-exact reproducibility property hold at every
+shape regardless of throughput; whole-model memory reduction under
+the default FFN-only replacement policy is $\sim 30{-}35\%$, and
+approaches $2\times$ when attention is also quantised.
 End-to-end autoregressive throughput on
 \textsc{Qwen2.5-Coder-1.5B-Instruct} closes to BF16 parity
 ($133.2$ vs $132.8$ tok/s, $+0.3\,\%$ within run-to-run noise) once
@@ -255,27 +258,57 @@ the most mantissa precision, while extremely large or extremely small
 numbers get less. This matches the fact that, after training, most
 neural-network weights cluster within a few orders of magnitude of $1$.
 
-\bpsixteen{} is the 16-bit variant we focus on. A posit bit pattern is,
-first and foremost, a \emph{signed two's-complement integer}, and its value is
-obtained by interpreting that integer: if the sign bit is set, first take the
-two's complement of the whole word, then read the regime $k$, exponent $e$,
-and fraction $f$ off the resulting \emph{magnitude} pattern, giving
+\bpsixteen{} is the 16-bit variant we focus on. The leading bit is
+the sign $s$; the remaining 15 bits encode a magnitude in posit's
+two's-complement-style sign representation. When $s = 1$ those 15
+bits are first replaced by their 15-bit two's complement; in both
+cases the regime $k$, exponent $e$, and fraction $f$ are then
+decoded from the (possibly complemented) 15 bits, and the magnitude
+is
 \[
-    \mathrm{value} = \mathrm{sign} \cdot \mathrm{useed}^k \cdot 2^e \cdot (1 + f),
-    \qquad \mathrm{sign} \in \{+1, -1\},
+    |\mathrm{value}| \;=\; \mathrm{useed}^{\,k} \cdot 2^{\,e} \cdot (1 + f).
 \]
-per the Posit\textsuperscript{TM} Standard (2022) general formula. (A common
-shorthand reads $k,e,f$ directly off the raw bits and prepends $(-1)^{\mathrm{sign}}$,
-treating the posit as sign-magnitude; that form is \emph{wrong for negative
-values} because it skips the two's-complement step, and the error grows with
-the regime.) The regime, exponent, and fraction together occupy the 15
-bits below the sign. With three exponent bits the per-regime base is
-$\mathrm{useed} = 2^{2^3} = 256$. The \emph{bounded} variant
-\cite{gustafson_endoferror}, aligned with the Posit Working Group
-draft standard \cite{posit_2017}, caps the regime field at
-$r_S = 6$ bits, fixing the dynamic range at $2^{-48}$ to $2^{48}$. \bpsixteen{}'s
-precision is comparable to FP16 and BF16: roughly $3.5$ decimal
-digits.
+The signed value is $+|\mathrm{value}|$ when $s = 0$ and
+$-|\mathrm{value}|$ when $s = 1$. With three exponent bits the
+per-regime base is $\mathrm{useed} = 2^{2^3} = 256$. The
+\emph{bounded} variant \cite{gustafson_endoferror}, aligned with the
+Posit Working Group draft standard \cite{posit_2017}, caps the
+regime field at $r_S = 6$ bits, fixing the dynamic range at
+$2^{-48}$ to $2^{48}$. \bpsixteen{}'s precision is comparable to
+FP16 and BF16: roughly $3.5$ decimal digits.
+
+\paragraph{A common shorthand that is wrong.} The single-formula
+expression
+\[
+    \mathrm{value} \;\stackrel{?}{=}\; (-1)^{s} \cdot \mathrm{useed}^{\,k}
+    \cdot 2^{\,e} \cdot (1 + f)
+\]
+appears in several recent posit papers but gives the wrong magnitude
+for negative posits, because it skips the two's-complement step on
+the trailing bits.\footnote{John L.\ Gustafson, personal
+communication, 2026-05; see also the reference implementation in our
+public source. The shorthand is structurally identical to the
+IEEE-754 sign-magnitude formula, which is likely why it propagates:
+it ``looks right'' to a reader familiar with float and the
+arithmetic happens to work out for positive values.} To see the
+discrepancy concretely, consider the 6-bit standard posit
+\texttt{1\,01\,10\,1} ($\mathrm{eS}{=}2$, $\mathrm{useed}{=}16$).
+Read off the bits without complementing: $s{=}1$, $k{=}{-}1$,
+$e{=}2$, $f{=}1/2$. The shorthand evaluates to
+\[
+    (-1)^{1} \cdot 16^{-1} \cdot 2^{2} \cdot (1 + \tfrac{1}{2})
+    \;=\; -\,\tfrac{3}{8}.
+\]
+The correct two-case decode replaces the trailing \texttt{01101}
+with its 5-bit two's complement \texttt{10011}, which decodes to
+$k{=}0$, $e{=}1$, $f{=}1/2$, giving magnitude
+$16^{0} \cdot 2^{1} \cdot (1 + \tfrac{1}{2}) = 3$ and signed value
+$-3$. The two formulations differ by a factor of $8$ — and the
+discrepancy grows with the regime, so any negative posit whose magnitude
+is far from $1$ is decoded with a wildly wrong value under the
+shorthand. We adopt the two-case decode throughout this paper and in
+our reference implementation, and call this out explicitly in the
+hope of arresting the misformulation's spread.
 
 Two bit patterns are reserved: \texttt{0x0000} for zero and
 \texttt{0x8000} for \NaR{}, ``Not-a-Real''. Unlike IEEE NaN's
@@ -905,14 +938,14 @@ kernels move.}
 \begin{figure}[h]
 \centering
 \begin{tikzpicture}
-\begin{semilogyaxis}[
+\begin{semilogxaxis}[
     width=0.82\linewidth, height=5.0cm,
     xbar,
     bar width=14pt,
     xmin=0.005, xmax=1.0,
     xlabel={L2 relative error vs BF16 baseline (log scale)},
     xlabel style={font=\small},
-    symbolic y coords={pertensor, perchannel, pertoken, gptq},
+    symbolic y coords={pertensor,perchannel,pertoken,gptq},
     ytick=data,
     yticklabels={%
         per-tensor $W$ (naive),
@@ -924,27 +957,32 @@ kernels move.}
     xticklabel style={font=\footnotesize},
     xmajorgrids,
     grid style={black!15},
-    nodes near coords,
-    every node near coord/.append style={
-        font=\tiny, black!75, anchor=west, xshift=2pt,
-    },
-    nodes near coords align={horizontal},
-    point meta=explicit symbolic,
 ]
-\addplot[draw=black!70, fill=barlose, fill opacity=0.7,
-         point meta=explicit symbolic]
-    coordinates {(0.50, pertensor) [{50\% (clipping blow-up)}]};
-\addplot[draw=black!70, fill=barpar, fill opacity=0.7,
-         point meta=explicit symbolic]
-    coordinates {(0.247, perchannel) [{24.7\%}]};
-\addplot[draw=black!70, fill=barwin, fill opacity=0.7,
-         point meta=explicit symbolic]
-    coordinates {(0.0345, pertoken) [{3.45\%}]};
+% Whitepaper rev (2026-05-18): two related fixes for this figure.
+% (1) the axis was semilogyaxis, but xbar with a log x-scale
+% needs semilogxaxis — the prior combo crashed pgfplots in recent
+% TeXLive versions and rendered the axis without any bars.
+% (2) bar labels use explicit \node placement instead of the
+% point-meta=explicit-symbolic + nodes-near-coords pattern, which
+% interacts badly with \% inside bracketed symbolic text.
+\addplot[draw=black!70, fill=barlose, fill opacity=0.7]
+    coordinates {(0.50,pertensor)};
+\node[font=\tiny, black!75, anchor=west, xshift=2pt]
+    at (axis cs:0.50,pertensor) {50\% (clipping blow-up)};
+\addplot[draw=black!70, fill=barpar, fill opacity=0.7]
+    coordinates {(0.247,perchannel)};
+\node[font=\tiny, black!75, anchor=west, xshift=2pt]
+    at (axis cs:0.247,perchannel) {24.7\%};
+\addplot[draw=black!70, fill=barwin, fill opacity=0.7]
+    coordinates {(0.0345,pertoken)};
+\node[font=\tiny, black!75, anchor=west, xshift=2pt]
+    at (axis cs:0.0345,pertoken) {3.45\%};
 \addplot[draw=black!70, fill=barfill!40, fill opacity=0.6,
-         postaction={pattern=north east lines, pattern color=black!50},
-         point meta=explicit symbolic]
-    coordinates {(0.01, gptq) [{$\le 1\%$ (target)}]};
-\end{semilogyaxis}
+         postaction={pattern=north east lines, pattern color=black!50}]
+    coordinates {(0.01,gptq)};
+\node[font=\tiny, black!75, anchor=west, xshift=2pt]
+    at (axis cs:0.01,gptq) {$\le 1\%$ (target)};
+\end{semilogxaxis}
 \end{tikzpicture}
 \caption{W8A8 PTQ progression. Per-tensor naive scaling fails on
 outlier-injected weights (the $50\%$ marker is approximate; exact
