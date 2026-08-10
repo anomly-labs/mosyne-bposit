@@ -12,4 +12,4 @@ rebuild:
 	@./demo.sh --rebuild
 
 clean:
-	@rm -f /tmp/repro_demo_gpu*.log ../../../deploy/5dst_cuda/test_determinism
+	@rm -f /tmp/repro_demo_gpu*.log ../../../kernels/test_determinism

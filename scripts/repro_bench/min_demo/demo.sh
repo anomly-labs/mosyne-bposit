@@ -21,7 +21,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
-KERNEL_DIR="$REPO_ROOT/deploy/5dst_cuda"
+KERNEL_DIR="$REPO_ROOT/kernels"
 BINARY="$KERNEL_DIR/test_determinism"
 
 REBUILD=0
@@ -43,7 +43,7 @@ if [[ "$REBUILD" -eq 1 ]] || [[ ! -x "$BINARY" ]]; then
     echo "[build] compiling test_determinism_headline.cu (sm_86 + sm_120) ..."
     [ -f "$KERNEL_DIR/bposit16_luts.cuh" ] || {
         echo "[build] regenerating bposit16_luts.cuh from Python reference"
-        ( cd "$KERNEL_DIR" && "$REPO_ROOT/.venv/bin/python" build_bposit_luts.py | tail -1 )
+        ( cd "$KERNEL_DIR" && python3 build_bposit_luts.py | tail -1 )
     }
     nvcc -O3 -std=c++17 -diag-suppress 186 \
          -gencode arch=compute_86,code=sm_86 \
