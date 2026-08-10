@@ -31,7 +31,7 @@ mosyne-bposit-probe --json > probe_yourgpu.json
 
 Then either:
 - Open an issue titled `probe: <GPU model>` and paste the JSON, or
-- Email it to ry@anomly.com
+- Send it via [anomly.com/contact](https://anomly.com/contact)
 
 We'll add your card to the verified-bit-exact list in the README,
 credit you in the next release, and tag you in the launch post
@@ -196,9 +196,10 @@ For the parent framework (private gitlab repo — `gitlab.com/anomly/mosyne`):
   porting plan discussions, probe-result submissions
 - **GitHub Discussions** for open-ended questions ("would this
   work for X?") — keeps Issues focused on actionable items
-- **ry@anomly.com** for anything that genuinely doesn't fit a
-  public channel (security disclosures, BD / partnership
-  conversations, sensitive substrate-port collaborations)
+- **[anomly.com/contact](https://anomly.com/contact)** for anything that
+  genuinely doesn't fit a public channel (security disclosures,
+  BD / partnership conversations, sensitive substrate-port
+  collaborations)
 
 ## Code of conduct
 

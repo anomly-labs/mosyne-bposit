@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "Apache-2.0" }
 authors = [
-    { name = "Ry Bruscoe", email = "ry@anomly.com" },
+    { name = "Ry Bruscoe" },
 ]
 keywords = ["posit", "bposit", "quantization", "INT8", "IMMA", "tensor-cores", "LLM", "deterministic"]
 classifiers = [
