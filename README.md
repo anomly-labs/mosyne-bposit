@@ -74,6 +74,12 @@ needs — just the synthetic 65 K-element log-uniform sum from
 whitepaper §4.2 turned into a turnkey artifact. Full design notes:
 `scripts/repro_bench/min_demo/README.md`.
 
+To turn the codes your hardware prints into a *verifiable receipt* —
+graded by the same reference verifier that grades the published
+conformance vectors — see `examples/python/cross_gpu_receipt_demo.py`
+in the companion repo
+[computation-receipts](https://github.com/anomly-labs/computation-receipts).
+
 ## Quick start
 
 ```bash
